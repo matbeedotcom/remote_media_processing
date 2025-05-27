@@ -97,15 +97,55 @@ pip install remotemedia
 ```
 remotemedia/                 # Core SDK package
 ├── core/                   # Core pipeline and node classes
+│   ├── pipeline.py         # Pipeline management
+│   ├── node.py             # Base Node and RemoteExecutorConfig
+│   └── exceptions.py       # Custom exceptions
 ├── nodes/                  # Built-in processing nodes
+│   ├── base.py             # Basic utility nodes (PassThrough, Buffer)
+│   ├── audio.py            # Audio processing nodes
+│   ├── video.py            # Video processing nodes
+│   ├── transform.py        # Data transformation nodes
+│   ├── calculator.py       # Calculator node for testing
+│   ├── text_processor.py   # Text processing node
+│   ├── code_executor.py    # Remote Python code execution
+│   └── serialized_class_executor.py  # CloudPickle class execution
+├── packaging/              # Code & dependency packaging (Phase 3)
+│   ├── dependency_analyzer.py  # AST-based import analysis
+│   └── code_packager.py    # Archive creation with dependencies
 ├── webrtc/                 # WebRTC communication
+│   └── manager.py          # WebRTC connection manager
 ├── remote/                 # Remote execution client
+│   └── client.py           # gRPC remote execution client
 ├── serialization/          # Data serialization utilities
-└── utils/                  # Common utilities
+│   └── base.py             # JSON and Pickle serializers
+├── utils/                  # Common utilities
+│   └── logging.py          # Logging configuration
+└── cli.py                  # Command-line interface
 
 examples/                   # Example applications
-tests/                      # Test suite
+├── basic_pipeline.py       # Basic local pipeline usage
+├── simple_remote_test.py   # Remote execution examples
+└── README.md               # Examples documentation
+
+tests/                      # Comprehensive test suite
+├── test_pipeline.py        # Pipeline class tests
+├── test_connection.py      # Basic connection tests
+├── test_working_system.py  # System integration tests
+├── test_remote_code_execution.py     # Remote Python execution
+├── test_cloudpickle_execution.py     # CloudPickle class execution
+├── test_dependency_packaging.py      # AST analysis & packaging
+├── test_custom_node_remote_execution.py  # Custom node execution
+├── test_custom_library_packaging.py  # Custom library tests
+├── test_existing_custom_library.py   # Real file dependency tests
+├── import_detection_tests/ # Test files for dependency analysis
+└── run_remote_test.py      # Test runner utilities
+
 remote_service/             # Remote execution service (Docker)
+├── src/                    # gRPC server implementation
+├── Dockerfile              # Container configuration
+├── requirements.txt        # Service dependencies
+└── README.md               # Service documentation
+
 docs/                       # Documentation
 scripts/                    # Development scripts
 ```
