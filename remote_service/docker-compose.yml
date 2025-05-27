@@ -1,0 +1,106 @@
+version: '3.8'
+
+services:
+  # Remote Execution Service
+  remote-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: remotemedia-service
+    ports:
+      - "50051:50051"  # gRPC port
+      - "8080:8080"    # Metrics/health port
+    environment:
+      - GRPC_PORT=50051
+      - LOG_LEVEL=DEBUG
+      - SANDBOX_ENABLED=true
+      - MAX_WORKERS=4
+      - SANDBOX_TYPE=bubblewrap
+      - METRICS_PORT=8080
+    volumes:
+      # Mount logs for debugging
+      - ./logs:/app/logs
+      # Mount config for development
+      - ./config:/app/config:ro
+      # Mount source for development (comment out for production)
+      - ./src:/app/src:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "/app/src/health_check.py"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    # Security settings
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - SYS_PTRACE  # Required for some sandboxing operations
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  # Prometheus for metrics collection (optional)
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: remotemedia-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    restart: unless-stopped
+    profiles:
+      - monitoring
+
+  # Grafana for metrics visualization (optional)
+  grafana:
+    image: grafana/grafana:latest
+    container_name: remotemedia-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+    restart: unless-stopped
+    profiles:
+      - monitoring
+
+  # Redis for session management (optional)
+  redis:
+    image: redis:7-alpine
+    container_name: remotemedia-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    profiles:
+      - session-store
+
+volumes:
+  prometheus_data:
+  grafana_data:
+  redis_data:
+
+networks:
+  default:
+    name: remotemedia-network 

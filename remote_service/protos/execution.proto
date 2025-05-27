@@ -1,0 +1,179 @@
+syntax = "proto3";
+
+package remotemedia.execution;
+
+import "types.proto";
+
+// Remote Execution Service
+// Provides secure, sandboxed execution of processing nodes
+service RemoteExecutionService {
+  // Execute a predefined SDK node
+  rpc ExecuteNode(ExecuteNodeRequest) returns (ExecuteNodeResponse);
+  
+  // Execute user-defined code (Phase 3)
+  rpc ExecuteCustomTask(ExecuteCustomTaskRequest) returns (ExecuteCustomTaskResponse);
+  
+  // Bidirectional streaming execution for real-time processing
+  rpc StreamExecute(stream StreamExecuteRequest) returns (stream StreamExecuteResponse);
+  
+  // Get service status and health information
+  rpc GetStatus(StatusRequest) returns (StatusResponse);
+  
+  // List available SDK nodes
+  rpc ListNodes(ListNodesRequest) returns (ListNodesResponse);
+}
+
+// Execute SDK Node Request
+message ExecuteNodeRequest {
+  string node_type = 1;           // Type of SDK node (e.g., "AudioTransform")
+  map<string, string> config = 2; // Node configuration parameters
+  bytes input_data = 3;           // Serialized input data
+  string serialization_format = 4; // Format used for serialization (json, pickle)
+  ExecutionOptions options = 5;    // Execution options
+}
+
+// Execute SDK Node Response
+message ExecuteNodeResponse {
+  ExecutionStatus status = 1;     // Execution status
+  bytes output_data = 2;          // Serialized output data
+  string error_message = 3;       // Error message if execution failed
+  string error_traceback = 4;     // Full error traceback for debugging
+  ExecutionMetrics metrics = 5;   // Execution performance metrics
+}
+
+// Execute Custom Task Request (Phase 3)
+message ExecuteCustomTaskRequest {
+  bytes code_package = 1;         // Packaged user code (zip archive)
+  string entry_point = 2;         // Entry point function/method
+  bytes input_data = 3;           // Serialized input data
+  string serialization_format = 4; // Format used for serialization
+  repeated string dependencies = 5; // Required Python packages
+  ExecutionOptions options = 6;    // Execution options
+}
+
+// Execute Custom Task Response (Phase 3)
+message ExecuteCustomTaskResponse {
+  ExecutionStatus status = 1;     // Execution status
+  bytes output_data = 2;          // Serialized output data
+  string error_message = 3;       // Error message if execution failed
+  string error_traceback = 4;     // Full error traceback for debugging
+  ExecutionMetrics metrics = 5;   // Execution performance metrics
+  repeated string installed_deps = 6; // Successfully installed dependencies
+}
+
+// Streaming execution request
+message StreamExecuteRequest {
+  oneof request_type {
+    StreamInitRequest init = 1;   // Initialize streaming session
+    StreamDataRequest data = 2;   // Send data for processing
+    StreamCloseRequest close = 3; // Close streaming session
+  }
+}
+
+// Streaming execution response
+message StreamExecuteResponse {
+  oneof response_type {
+    StreamInitResponse init = 1;  // Session initialization response
+    StreamDataResponse data = 2;  // Processed data response
+    StreamErrorResponse error = 3; // Error response
+    StreamCloseResponse close = 4; // Session close response
+  }
+}
+
+// Initialize streaming session
+message StreamInitRequest {
+  string node_type = 1;           // Type of SDK node or "custom"
+  map<string, string> config = 2; // Node configuration
+  bytes code_package = 3;         // Custom code package (if applicable)
+  ExecutionOptions options = 4;   // Execution options
+}
+
+// Streaming session initialization response
+message StreamInitResponse {
+  string session_id = 1;          // Unique session identifier
+  ExecutionStatus status = 2;     // Initialization status
+  string error_message = 3;       // Error message if initialization failed
+}
+
+// Send data for processing in streaming session
+message StreamDataRequest {
+  string session_id = 1;          // Session identifier
+  bytes input_data = 2;           // Serialized input data
+  string serialization_format = 3; // Serialization format
+}
+
+// Processed data response in streaming session
+message StreamDataResponse {
+  string session_id = 1;          // Session identifier
+  bytes output_data = 2;          // Serialized output data
+  ExecutionMetrics metrics = 3;   // Processing metrics
+}
+
+// Error response in streaming session
+message StreamErrorResponse {
+  string session_id = 1;          // Session identifier
+  string error_message = 2;       // Error message
+  string error_traceback = 3;     // Error traceback
+}
+
+// Close streaming session
+message StreamCloseRequest {
+  string session_id = 1;          // Session identifier
+}
+
+// Streaming session close response
+message StreamCloseResponse {
+  string session_id = 1;          // Session identifier
+  ExecutionMetrics total_metrics = 2; // Total session metrics
+}
+
+// Service status request
+message StatusRequest {
+  bool include_metrics = 1;       // Include performance metrics
+  bool include_sessions = 2;      // Include active session info
+}
+
+// Service status response
+message StatusResponse {
+  ServiceStatus status = 1;       // Overall service status
+  ServiceMetrics metrics = 2;     // Service performance metrics
+  repeated SessionInfo active_sessions = 3; // Active streaming sessions
+  string version = 4;             // Service version
+  int64 uptime_seconds = 5;       // Service uptime in seconds
+}
+
+// List available nodes request
+message ListNodesRequest {
+  string category = 1;            // Filter by category (audio, video, transform)
+}
+
+// List available nodes response
+message ListNodesResponse {
+  repeated NodeInfo available_nodes = 1; // Available SDK nodes
+}
+
+// Information about an available node
+message NodeInfo {
+  string node_type = 1;           // Node type identifier
+  string category = 2;            // Node category
+  string description = 3;         // Node description
+  repeated ParameterInfo parameters = 4; // Configuration parameters
+}
+
+// Parameter information for a node
+message ParameterInfo {
+  string name = 1;                // Parameter name
+  string type = 2;                // Parameter type
+  string description = 3;         // Parameter description
+  bool required = 4;              // Whether parameter is required
+  string default_value = 5;       // Default value (if any)
+}
+
+// Information about an active session
+message SessionInfo {
+  string session_id = 1;          // Session identifier
+  string node_type = 2;           // Node type being executed
+  int64 created_timestamp = 3;    // Session creation time
+  int64 last_activity = 4;        // Last activity timestamp
+  int32 processed_items = 5;      // Number of items processed
+} 
