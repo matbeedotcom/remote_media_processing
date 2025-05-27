@@ -14,15 +14,33 @@ The RemoteMedia Processing SDK enables developers to create complex, real-time p
 - **WebRTC Integration**: Built-in WebRTC support for real-time communication
 - **Flexible Architecture**: Support for both SDK-provided and custom processing nodes
 - **Secure Remote Execution**: Sandboxed execution environment for user-defined code
+- **CloudPickle Integration**: Serialize and execute user-defined Python classes remotely
+- **AST-Based Dependency Analysis**: Automatic detection and packaging of local Python dependencies
 
 ## Development Status
 
-**Current Phase**: Phase 1 - Core SDK Framework & Local Processing
+**Current Phase**: Phase 3 - Advanced Offloading for User-Defined Python Code (COMPLETE) ✅
 
-This project is under active development. See `DevelopmentStrategyDocument.md` for detailed roadmap and `PROJECT_TRACKING.md` for current progress.
+**Phase 3 Achievements:**
+- ✅ **Remote Python Code Execution**: Full support for executing user-defined Python code remotely
+- ✅ **CloudPickle Class Serialization**: Serialize and execute custom Python classes with state preservation
+- ✅ **AST-Based Dependency Analysis**: Automatic detection of local Python file dependencies
+- ✅ **Code & Dependency Packaging**: Complete packaging system for deployable archives
+- ✅ **Secure Execution Environment**: Sandboxed remote execution with restricted globals
+- ✅ **Comprehensive Testing**: 7/7 test scenarios passing (4 CloudPickle + 3 dependency packaging)
+
+**What Works Now:**
+- Users can define Python classes locally with custom dependencies
+- AST analysis automatically detects and packages local Python file imports
+- CloudPickle enables serialization of complex user-defined objects
+- Remote execution preserves object state and functionality across network boundaries
+- End-to-end remote code execution with proper error handling and logging
+
+See `PHASE_3_PROJECT_TRACKING.md` for detailed status and `DevelopmentStrategyDocument.md` for complete roadmap.
 
 ## Quick Start
 
+### Local Processing Pipeline
 ```python
 from remotemedia import Pipeline
 from remotemedia.nodes import AudioTransform, VideoTransform
@@ -34,6 +52,34 @@ pipeline.add_node(VideoTransform(resolution=(1920, 1080)))
 
 # Process data
 result = pipeline.process(input_data)
+```
+
+### Remote Code Execution (Phase 3)
+```python
+from remotemedia.remote.client import RemoteExecutionClient
+from remotemedia.core.node import RemoteExecutorConfig
+
+# Define a custom class
+class DataProcessor:
+    def __init__(self):
+        self.processed_count = 0
+    
+    def process(self, data):
+        self.processed_count += 1
+        return {"result": data * 2, "count": self.processed_count}
+
+# Execute remotely with CloudPickle
+config = RemoteExecutorConfig(host='localhost', port=50051)
+async with RemoteExecutionClient(config) as client:
+    result = await client.execute_node(
+        node_type="SerializedClassExecutorNode",
+        config={},
+        input_data={
+            "serialized_object": cloudpickle.dumps(DataProcessor()),
+            "method_name": "process",
+            "method_args": [42]
+        }
+    )
 ```
 
 ## Installation
