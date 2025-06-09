@@ -12,6 +12,7 @@ from .calculator import *  # noqa: F401, F403
 from .code_executor import *  # noqa: F401, F403
 from .text_processor import *  # noqa: F401, F403
 from .serialized_class_executor import *  # noqa: F401, F403
+from .source import * # noqa: F401, F403
 
 # ML nodes will be added in later phases
 # from .ml import *  # noqa: F401, F403
@@ -36,4 +37,6 @@ __all__ = [
     "CodeExecutorNode", 
     "TextProcessorNode",
     "SerializedClassExecutorNode",
+    # Source nodes
+    "MediaReaderNode",
 ] 

@@ -54,7 +54,8 @@ class TestPipeline:
         # Test removing non-existent node
         assert pipeline.remove_node("nonexistent") is False
     
-    def test_pipeline_processing(self):
+    @pytest.mark.asyncio
+    async def test_pipeline_processing(self):
         """Test pipeline data processing."""
         pipeline = Pipeline()
         node1 = MockNode(name="node1", return_value="step1")
@@ -64,9 +65,11 @@ class TestPipeline:
         pipeline.add_node(node2)
         
         with pipeline.managed_execution():
-            result = pipeline.process("input")
+            final_result = None
+            async for result in pipeline.process("input"):
+                final_result = result
             
-        assert result == "step2"
+        assert final_result == "step2"
         assert node1.process_called
         assert node2.process_called
     
@@ -77,13 +80,16 @@ class TestPipeline:
         with pytest.raises(PipelineError, match="Cannot initialize empty pipeline"):
             pipeline.initialize()
     
-    def test_uninitialized_processing_error(self):
+    @pytest.mark.asyncio
+    async def test_uninitialized_processing_error(self):
         """Test that uninitialized pipeline raises error on processing."""
         pipeline = Pipeline()
         pipeline.add_node(MockNode())
         
         with pytest.raises(PipelineError, match="Pipeline must be initialized"):
-            pipeline.process("data")
+            # We need to try to start the async generator to trigger the check
+            p = pipeline.process("data")
+            await p.asend(None)
     
     def test_pipeline_iteration(self):
         """Test pipeline iteration."""

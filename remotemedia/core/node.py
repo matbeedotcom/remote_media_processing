@@ -63,8 +63,9 @@ class Node(ABC):
         self.remote_config = remote_config
         self.config = kwargs
         self._is_initialized = False
+        self.logger = logging.getLogger(self.__class__.__name__)
         
-        logger.debug(f"Created node: {self.name}")
+        self.logger.debug(f"Created node: {self.name}")
     
     @abstractmethod
     def process(self, data: Any) -> Any:
@@ -94,7 +95,7 @@ class Node(ABC):
         if self._is_initialized:
             return
             
-        logger.debug(f"Initializing node: {self.name}")
+        self.logger.debug(f"Initializing node: {self.name}")
         self._initialize_impl()
         self._is_initialized = True
     
@@ -113,7 +114,7 @@ class Node(ABC):
         This method is called when the node is no longer needed.
         Override this method to perform any cleanup required by the node.
         """
-        logger.debug(f"Cleaning up node: {self.name}")
+        self.logger.debug(f"Cleaning up node: {self.name}")
         self._cleanup_impl()
         self._is_initialized = False
     

@@ -8,6 +8,7 @@ with the RemoteMedia SDK.
 
 import sys
 import os
+import asyncio
 
 # Add the parent directory to the path so we can import remotemedia
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -17,7 +18,7 @@ from remotemedia.nodes import PassThroughNode, AudioTransform, VideoTransform
 from remotemedia.utils import setup_logging
 
 
-def main():
+async def main():
     """Run the basic pipeline example."""
     # Set up logging
     setup_logging(level="DEBUG")
@@ -43,8 +44,8 @@ def main():
     try:
         with pipeline.managed_execution():
             print(f"\nProcessing data: {test_data}")
-            result = pipeline.process(test_data)
-            print(f"Result: {result}")
+            async for result in pipeline.process(test_data):
+                print(f"Result: {result}")
             
     except Exception as e:
         print(f"Error during processing: {e}")
@@ -55,4 +56,4 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main()) 
+    asyncio.run(main()) 

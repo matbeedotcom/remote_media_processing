@@ -2,10 +2,13 @@
 Pipeline class for managing sequences of processing nodes.
 """
 
-from typing import Any, List, Optional, Dict, Iterator
+from typing import Any, List, Optional, Dict, Iterator, AsyncGenerator
 import logging
 import time
 from contextlib import contextmanager
+import asyncio
+from inspect import isasyncgen
+import inspect
 
 from .node import Node
 from .exceptions import PipelineError, NodeError
@@ -31,8 +34,9 @@ class Pipeline:
         self.name = name or f"Pipeline_{id(self)}"
         self.nodes: List[Node] = []
         self._is_initialized = False
+        self.logger = logging.getLogger(self.__class__.__name__)
         
-        logger.debug(f"Created pipeline: {self.name}")
+        self.logger.debug(f"Created pipeline: {self.name}")
     
     def add_node(self, node: Node) -> "Pipeline":
         """
@@ -54,7 +58,7 @@ class Pipeline:
             raise PipelineError(f"Expected Node instance, got {type(node)}")
         
         self.nodes.append(node)
-        logger.debug(f"Added node '{node.name}' to pipeline '{self.name}'")
+        self.logger.debug(f"Added node '{node.name}' to pipeline '{self.name}'")
         
         return self
     
@@ -77,7 +81,7 @@ class Pipeline:
         for i, node in enumerate(self.nodes):
             if node.name == node_name:
                 removed_node = self.nodes.pop(i)
-                logger.debug(f"Removed node '{removed_node.name}' from pipeline '{self.name}'")
+                self.logger.debug(f"Removed node '{removed_node.name}' from pipeline '{self.name}'")
                 return True
         
         return False
@@ -112,70 +116,92 @@ class Pipeline:
         if not self.nodes:
             raise PipelineError("Cannot initialize empty pipeline")
         
-        logger.info(f"Initializing pipeline '{self.name}' with {len(self.nodes)} nodes")
+        self.logger.info(f"Initializing pipeline '{self.name}' with {len(self.nodes)} nodes")
         
         try:
             for node in self.nodes:
-                logger.debug(f"Initializing node: {node.name}")
+                self.logger.debug(f"Initializing node: {node.name}")
                 node.initialize()
             
             self._is_initialized = True
-            logger.info(f"Pipeline '{self.name}' initialized successfully")
+            self.logger.info(f"Pipeline '{self.name}' initialized successfully")
             
         except Exception as e:
-            logger.error(f"Failed to initialize pipeline '{self.name}': {e}")
+            self.logger.error(f"Failed to initialize pipeline '{self.name}': {e}")
             # Clean up any partially initialized nodes
             self.cleanup()
             raise PipelineError(f"Pipeline initialization failed: {e}") from e
     
-    def process(self, data: Any) -> Any:
+    async def process(self, data: Any = None) -> AsyncGenerator[Any, None]:
         """
-        Process data through the entire pipeline.
-        
+        Process data through the entire pipeline asynchronously.
+
+        This method can handle both single-item processing and streaming data
+        from source nodes.
+
+        If a node's `process()` method returns an async generator, the pipeline
+        will iterate through it, feeding each item to the subsequent nodes.
+
         Args:
-            data: Input data to process
-            
-        Returns:
-            Processed data after passing through all nodes
-            
-        Raises:
-            PipelineError: If the pipeline is not initialized or processing fails
+            data: Initial input data. For source nodes, this is typically None.
+
+        Yields:
+            The final processed data item(s).
         """
         if not self._is_initialized:
             raise PipelineError("Pipeline must be initialized before processing")
-        
+
         if not self.nodes:
-            raise PipelineError("Cannot process data with empty pipeline")
+            self.logger.warning("Cannot process data with an empty pipeline.")
+            return
+
+        first_node = self.nodes[0]
+        remaining_nodes = self.nodes[1:]
+
+        # If initial data is provided, wrap it in a stream. Otherwise,
+        # the first node is the source and its process() method must
+        # return the initial stream.
+        if data is not None:
+            async def _initial_stream_gen(d):
+                yield d
+            initial_stream = _initial_stream_gen(data)
+            # The first node processes the initial data
+            nodes_to_process = self.nodes
+        else:
+            # The first node is the source
+            initial_stream = first_node.process(None)
+            nodes_to_process = remaining_nodes
+
+        if not inspect.isasyncgen(initial_stream):
+            async def _wrap_in_async_gen(d):
+                yield d
+            current_stream = _wrap_in_async_gen(initial_stream)
+        else:
+            current_stream = initial_stream
         
-        logger.debug(f"Processing data through pipeline '{self.name}'")
-        start_time = time.time()
-        
-        try:
-            current_data = data
-            
-            for i, node in enumerate(self.nodes):
-                logger.debug(f"Processing node {i+1}/{len(self.nodes)}: {node.name}")
-                
-                try:
-                    if node.is_remote:
-                        # TODO: Implement remote execution in Phase 2
-                        logger.warning(f"Remote execution not yet implemented for node '{node.name}', running locally")
-                        current_data = node.process(current_data)
+
+        # Chain the remaining nodes together
+        for node in nodes_to_process:
+            # Create a new generator that applies the current node to the stream
+            async def _next_stream_generator(current_node, stream):
+                loop = asyncio.get_running_loop()
+                async for item in stream:
+                    # Execute the node's process method
+                    result = await loop.run_in_executor(None, current_node.process, item)
+                    
+                    # If the result is a stream (async_generator), yield from it
+                    if inspect.isasyncgen(result):
+                        async for sub_item in result:
+                            yield sub_item
+                    # Otherwise, just yield the single result
                     else:
-                        current_data = node.process(current_data)
-                        
-                except Exception as e:
-                    logger.error(f"Node '{node.name}' failed: {e}")
-                    raise NodeError(f"Node '{node.name}' processing failed: {e}") from e
+                        yield result
             
-            processing_time = time.time() - start_time
-            logger.debug(f"Pipeline '{self.name}' processing completed in {processing_time:.3f}s")
-            
-            return current_data
-            
-        except Exception as e:
-            logger.error(f"Pipeline '{self.name}' processing failed: {e}")
-            raise PipelineError(f"Pipeline processing failed: {e}") from e
+            current_stream = _next_stream_generator(node, current_stream)
+
+        # Pull the data through the entire pipeline
+        async for final_result in current_stream:
+            yield final_result
     
     def cleanup(self) -> None:
         """
@@ -183,16 +209,16 @@ class Pipeline:
         
         This method should be called when the pipeline is no longer needed.
         """
-        logger.info(f"Cleaning up pipeline '{self.name}'")
+        self.logger.info(f"Cleaning up pipeline '{self.name}'")
         
         for node in self.nodes:
             try:
                 node.cleanup()
             except Exception as e:
-                logger.warning(f"Error cleaning up node '{node.name}': {e}")
+                self.logger.warning(f"Error cleaning up node '{node.name}': {e}")
         
         self._is_initialized = False
-        logger.debug(f"Pipeline '{self.name}' cleanup completed")
+        self.logger.debug(f"Pipeline '{self.name}' cleanup completed")
     
     @contextmanager
     def managed_execution(self):
