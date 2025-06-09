@@ -15,6 +15,26 @@ sys.path.insert(0, str(Path.cwd()))
 from remotemedia.core.node import RemoteExecutorConfig
 from remotemedia.remote.client import RemoteExecutionClient
 
+# Define a simple class that we want to execute remotely
+class SimpleCalculator:
+    def __init__(self, name="RemoteCalculator"):
+        self.name = name
+        self.operations_count = 0
+
+    def add(self, a, b):
+        self.operations_count += 1
+        return a + b
+
+    def multiply(self, a, b):
+        self.operations_count += 1
+        return a * b
+
+    def get_stats(self):
+        return {
+            "name": self.name,
+            "operations_performed": self.operations_count
+        }
+
 async def test_passthrough_node():
     """Test the basic PassThroughNode."""
     print("🔄 Testing PassThroughNode")
@@ -229,30 +249,10 @@ async def test_serialized_class_execution():
     print("\n🏗️ Testing Serialized Class Execution")
     print("-" * 40)
     
-    # Define a simple class that we want to execute remotely
-    class SimpleCalculator:
-        def __init__(self, name="RemoteCalculator"):
-            self.name = name
-            self.operations_count = 0
-        
-        def add(self, a, b):
-            self.operations_count += 1
-            return a + b
-        
-        def multiply(self, a, b):
-            self.operations_count += 1
-            return a * b
-        
-        def get_stats(self):
-            return {
-                "name": self.name,
-                "operations_performed": self.operations_count
-            }
-    
     # Serialize the class and create code to execute it
     import pickle
     import base64
-    
+
     # Create an instance and serialize it
     calc = SimpleCalculator("TestCalculator")
     serialized_calc = base64.b64encode(pickle.dumps(calc)).decode('ascii')
