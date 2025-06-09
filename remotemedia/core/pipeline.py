@@ -6,14 +6,20 @@ from typing import Any, List, Optional, Dict, Iterator, AsyncGenerator
 import logging
 import time
 from contextlib import contextmanager
+from contextlib import asynccontextmanager
 import asyncio
 from inspect import isasyncgen
 import inspect
+from concurrent.futures import ThreadPoolExecutor
 
 from .node import Node
 from .exceptions import PipelineError, NodeError
+from .types import _SENTINEL
 
 logger = logging.getLogger(__name__)
+
+# A unique object to represent an empty item that should be ignored by nodes.
+_EMPTY = object()
 
 
 class Pipeline:
@@ -36,7 +42,7 @@ class Pipeline:
         self._is_initialized = False
         self.logger = logging.getLogger(self.__class__.__name__)
         
-        self.logger.debug(f"Created pipeline: {self.name}")
+        self.logger.info(f"Created pipeline: {self.name}")
     
     def add_node(self, node: Node) -> "Pipeline":
         """
@@ -101,7 +107,7 @@ class Pipeline:
                 return node
         return None
     
-    def initialize(self) -> None:
+    async def initialize(self) -> None:
         """
         Initialize the pipeline and all its nodes.
         
@@ -121,7 +127,7 @@ class Pipeline:
         try:
             for node in self.nodes:
                 self.logger.debug(f"Initializing node: {node.name}")
-                node.initialize()
+                await node.initialize()
             
             self._is_initialized = True
             self.logger.info(f"Pipeline '{self.name}' initialized successfully")
@@ -129,81 +135,135 @@ class Pipeline:
         except Exception as e:
             self.logger.error(f"Failed to initialize pipeline '{self.name}': {e}")
             # Clean up any partially initialized nodes
-            self.cleanup()
+            await self.cleanup()
             raise PipelineError(f"Pipeline initialization failed: {e}") from e
     
-    async def process(self, data: Any = None) -> AsyncGenerator[Any, None]:
+    async def process(self, stream: AsyncGenerator[Any, None]) -> AsyncGenerator[Any, None]:
         """
-        Process data through the entire pipeline asynchronously.
+        Process a stream of data through the pipeline asynchronously and in parallel.
 
-        This method can handle both single-item processing and streaming data
-        from source nodes.
-
-        If a node's `process()` method returns an async generator, the pipeline
-        will iterate through it, feeding each item to the subsequent nodes.
+        This method sets up a series of unbounded queues and threaded workers,
+        one for each node, allowing for concurrent processing of the data stream.
 
         Args:
-            data: Initial input data. For source nodes, this is typically None.
+            stream: An async generator that yields data chunks for the pipeline.
 
         Yields:
-            The final processed data item(s).
+            The final processed data item(s) from the end of the pipeline.
         """
         if not self._is_initialized:
             raise PipelineError("Pipeline must be initialized before processing")
-
         if not self.nodes:
             self.logger.warning("Cannot process data with an empty pipeline.")
             return
 
-        first_node = self.nodes[0]
-        remaining_nodes = self.nodes[1:]
+        loop = asyncio.get_running_loop()
+        queues = [asyncio.Queue(maxsize=0) for _ in range(len(self.nodes) + 1)]
+        executor = ThreadPoolExecutor(max_workers=len(self.nodes), thread_name_prefix='PipelineWorker')
 
-        # If initial data is provided, wrap it in a stream. Otherwise,
-        # the first node is the source and its process() method must
-        # return the initial stream.
-        if data is not None:
-            async def _initial_stream_gen(d):
-                yield d
-            initial_stream = _initial_stream_gen(data)
-            # The first node processes the initial data
-            nodes_to_process = self.nodes
-        else:
-            # The first node is the source
-            initial_stream = first_node.process(None)
-            nodes_to_process = remaining_nodes
+        async def _worker(node: Node, in_queue: asyncio.Queue, out_queue: asyncio.Queue):
+            self.logger.debug(f"WORKER-START: '{node.name}'")
+            try:
+                while True:
+                    item = await in_queue.get()
+                    if item is _SENTINEL:
+                        self.logger.debug(f"WORKER-SENTINEL: '{node.name}'")
 
-        if not inspect.isasyncgen(initial_stream):
-            async def _wrap_in_async_gen(d):
-                yield d
-            current_stream = _wrap_in_async_gen(initial_stream)
-        else:
-            current_stream = initial_stream
-        
+                        # Flush the node if it has a flush method
+                        if hasattr(node, 'flush') and callable(getattr(node, 'flush')):
+                            self.logger.debug(f"WORKER-FLUSH: Flushing node '{node.name}'")
+                            flush_method = getattr(node, 'flush')
+                            if inspect.iscoroutinefunction(flush_method):
+                                flushed_result = await flush_method()
+                            else:
+                                flushed_result = await loop.run_in_executor(executor, flush_method)
+                            
+                            if flushed_result is not None:
+                                self.logger.debug(f"WORKER-FLUSH-RESULT: '{node.name}' produced output.")
+                                await out_queue.put(flushed_result)
 
-        # Chain the remaining nodes together
-        for node in nodes_to_process:
-            # Create a new generator that applies the current node to the stream
-            async def _next_stream_generator(current_node, stream):
-                loop = asyncio.get_running_loop()
-                async for item in stream:
-                    # Execute the node's process method
-                    result = await loop.run_in_executor(None, current_node.process, item)
+                        await out_queue.put(_SENTINEL)
+                        break
                     
-                    # If the result is a stream (async_generator), yield from it
-                    if inspect.isasyncgen(result):
-                        async for sub_item in result:
-                            yield sub_item
-                    # Otherwise, just yield the single result
+                    # Run the node's process method
+                    if inspect.iscoroutinefunction(node.process):
+                        result = await node.process(item)
                     else:
-                        yield result
-            
-            current_stream = _next_stream_generator(node, current_stream)
+                        result = await loop.run_in_executor(executor, node.process, item)
+                    
+                    if result is not None:
+                        self.logger.debug(f"WORKER-RESULT: '{node.name}' produced output.")
+                        await out_queue.put(result)
+            except Exception as e:
+                self.logger.error(f"WORKER-ERROR: in '{node.name}': {e}", exc_info=True)
+                await out_queue.put(_SENTINEL)
+            finally:
+                self.logger.debug(f"WORKER-FINISH: '{node.name}'")
 
-        # Pull the data through the entire pipeline
-        async for final_result in current_stream:
-            yield final_result
+        async def _streaming_worker(node: Node, in_queue: asyncio.Queue, out_queue: asyncio.Queue):
+            self.logger.debug(f"STREAMING-WORKER-START: '{node.name}'")
+            try:
+                # The node's process method will take the input queue and return an async gen
+                async def in_stream():
+                    while True:
+                        item = await in_queue.get()
+                        if item is _SENTINEL:
+                            break
+                        yield item
+
+                # The process method of a streaming node is an async generator
+                # that takes an async generator as input.
+                if inspect.isasyncgenfunction(node.process):
+                    async for result in node.process(in_stream()):
+                        if result is not None:
+                            await out_queue.put(result)
+
+                # Signal completion
+                await out_queue.put(_SENTINEL)
+
+            except Exception as e:
+                self.logger.error(f"STREAMING-WORKER-ERROR: in '{node.name}': {e}", exc_info=True)
+                await out_queue.put(_SENTINEL)
+            finally:
+                self.logger.debug(f"STREAMING-WORKER-FINISH: '{node.name}'")
+
+        tasks = []
+        for i, node in enumerate(self.nodes):
+            if getattr(node, 'is_streaming', False):
+                task = asyncio.create_task(
+                    _streaming_worker(node, queues[i], queues[i+1])
+                )
+            else:
+                task = asyncio.create_task(
+                    _worker(node, queues[i], queues[i+1])
+                )
+            tasks.append(task)
+
+        try:
+            # Feeder: Puts data from the input stream into the first queue
+            self.logger.debug("FEEDER-START")
+            async for item in stream:
+                await queues[0].put(item)
+            await queues[0].put(_SENTINEL)
+            self.logger.debug("FEEDER-FINISH")
+
+            # Consumer: Yields results from the final queue
+            output_queue = queues[-1]
+            while True:
+                result = await output_queue.get()
+                if result is _SENTINEL:
+                    self.logger.debug("CONSUMER-SENTINEL: Got sentinel.")
+                    break
+                yield result
+            self.logger.debug("CONSUMER-FINISH")
+        finally:
+            self.logger.debug("PIPELINE-CLEANUP")
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            executor.shutdown(wait=False)
     
-    def cleanup(self) -> None:
+    async def cleanup(self) -> None:
         """
         Clean up the pipeline and all its nodes.
         
@@ -213,27 +273,28 @@ class Pipeline:
         
         for node in self.nodes:
             try:
-                node.cleanup()
+                await node.cleanup()
             except Exception as e:
                 self.logger.warning(f"Error cleaning up node '{node.name}': {e}")
         
         self._is_initialized = False
         self.logger.debug(f"Pipeline '{self.name}' cleanup completed")
     
-    @contextmanager
-    def managed_execution(self):
+    @asynccontextmanager
+    async def managed_execution(self):
         """
         Context manager for automatic pipeline initialization and cleanup.
         
         Usage:
-            with pipeline.managed_execution():
-                result = pipeline.process(data)
+            async with pipeline.managed_execution():
+                async for result in pipeline.process(data_stream):
+                    ...
         """
         try:
-            self.initialize()
+            await self.initialize()
             yield self
         finally:
-            self.cleanup()
+            await self.cleanup()
     
     @property
     def is_initialized(self) -> bool:

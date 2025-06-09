@@ -13,8 +13,11 @@ service RemoteExecutionService {
   // Execute user-defined code (Phase 3)
   rpc ExecuteCustomTask(ExecuteCustomTaskRequest) returns (ExecuteCustomTaskResponse);
   
-  // Bidirectional streaming execution for real-time processing
-  rpc StreamExecute(stream StreamExecuteRequest) returns (stream StreamExecuteResponse);
+  // Bidirectional streaming for real-time processing
+  rpc StreamNode(stream StreamData) returns (stream StreamData);
+  
+  // Bidirectional streaming for serialized objects
+  rpc StreamObject(stream StreamObjectRequest) returns (stream StreamObjectResponse);
   
   // Get service status and health information
   rpc GetStatus(StatusRequest) returns (StatusResponse);
@@ -61,64 +64,47 @@ message ExecuteCustomTaskResponse {
   repeated string installed_deps = 6; // Successfully installed dependencies
 }
 
-// Streaming execution request
-message StreamExecuteRequest {
-  oneof request_type {
-    StreamInitRequest init = 1;   // Initialize streaming session
-    StreamDataRequest data = 2;   // Send data for processing
-    StreamCloseRequest close = 3; // Close streaming session
+// Data packet for bidirectional streaming
+message StreamData {
+  // The first message from the client MUST set the init field.
+  // Subsequent messages should only set the data field.
+  oneof payload {
+    StreamInit init = 1;
+    bytes data = 2;
+  }
+  
+  // This can be used by the server to send back errors.
+  string error_message = 10;
+}
+
+// Message to initialize a streaming session
+message StreamInit {
+  string node_type = 1;             // The type of node to execute (e.g., "AudioTransform")
+  map<string, string> config = 2;   // The configuration for the node
+  string serialization_format = 3;   // The serialization format to use
+}
+
+// Request for streaming a serialized object
+message StreamObjectRequest {
+  oneof payload {
+    StreamObjectInit init = 1;
+    bytes data = 2;
   }
 }
 
-// Streaming execution response
-message StreamExecuteResponse {
-  oneof response_type {
-    StreamInitResponse init = 1;  // Session initialization response
-    StreamDataResponse data = 2;  // Processed data response
-    StreamErrorResponse error = 3; // Error response
-    StreamCloseResponse close = 4; // Session close response
+// Response for streaming a serialized object
+message StreamObjectResponse {
+  oneof payload {
+    bytes data = 1;
+    string error = 2;
   }
 }
 
-// Initialize streaming session
-message StreamInitRequest {
-  string node_type = 1;           // Type of SDK node or "custom"
-  map<string, string> config = 2; // Node configuration
-  bytes code_package = 3;         // Custom code package (if applicable)
-  ExecutionOptions options = 4;   // Execution options
-}
-
-// Streaming session initialization response
-message StreamInitResponse {
-  string session_id = 1;          // Unique session identifier
-  ExecutionStatus status = 2;     // Initialization status
-  string error_message = 3;       // Error message if initialization failed
-}
-
-// Send data for processing in streaming session
-message StreamDataRequest {
-  string session_id = 1;          // Session identifier
-  bytes input_data = 2;           // Serialized input data
-  string serialization_format = 3; // Serialization format
-}
-
-// Processed data response in streaming session
-message StreamDataResponse {
-  string session_id = 1;          // Session identifier
-  bytes output_data = 2;          // Serialized output data
-  ExecutionMetrics metrics = 3;   // Processing metrics
-}
-
-// Error response in streaming session
-message StreamErrorResponse {
-  string session_id = 1;          // Session identifier
-  string error_message = 2;       // Error message
-  string error_traceback = 3;     // Error traceback
-}
-
-// Close streaming session
-message StreamCloseRequest {
-  string session_id = 1;          // Session identifier
+// Message to initialize a serialized object streaming session
+message StreamObjectInit {
+  bytes serialized_object = 1;      // The cloudpickled object
+  map<string, string> config = 2;   // The configuration for the node
+  string serialization_format = 3;   // The serialization format for data payloads
 }
 
 // Streaming session close response

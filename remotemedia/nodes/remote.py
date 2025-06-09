@@ -1,0 +1,127 @@
+"""
+Node for executing other nodes on a remote service.
+"""
+from typing import Any, Dict, AsyncGenerator, Optional
+import logging
+import asyncio
+
+from ..core.node import Node, RemoteExecutorConfig
+from ..core.exceptions import NodeError
+from ..remote.client import RemoteExecutionClient
+
+logger = logging.getLogger(__name__)
+
+
+class RemoteExecutionNode(Node):
+    """
+    A gateway node that executes a specified node type on a remote service.
+    
+    This node acts as a bridge in a local pipeline, sending its input data
+    to a remote service for processing by another node and then passing the
+    result on to the next local node. This version supports streaming.
+    """
+
+    def __init__(self, node_to_execute: str, remote_config: RemoteExecutorConfig, 
+                 node_config: Dict[str, Any] = None, serialization_format: str = "pickle", **kwargs):
+        """
+        Initializes the RemoteExecutionNode.
+
+        Args:
+            node_to_execute (str): The class name of the node to execute remotely.
+            remote_config (RemoteExecutorConfig): Configuration for the remote connection.
+            node_config (Dict[str, Any], optional): The configuration for the remote node itself. Defaults to None.
+            serialization_format (str, optional): Serialization format to use. Defaults to "pickle".
+        """
+        super().__init__(remote_config=remote_config, **kwargs)
+        if not isinstance(remote_config, RemoteExecutorConfig):
+            raise ValueError("remote_config must be a valid RemoteExecutorConfig instance.")
+            
+        self.node_to_execute = node_to_execute
+        self.node_config = node_config or {}
+        self.serialization_format = serialization_format
+        self.is_streaming = True  # Mark as a streaming node
+        self.client: RemoteExecutionClient = None
+
+    async def initialize(self):
+        """Initializes the remote execution client and connects."""
+        await super().initialize()
+        self.client = RemoteExecutionClient(self.remote_config)
+        await self.client.connect()
+        logger.info(f"RemoteExecutionNode '{self.name}' connected to {self.remote_config.host}:{self.remote_config.port}")
+
+    async def cleanup(self):
+        """Cleans up the client connection."""
+        if self.client:
+            await self.client.disconnect()
+            logger.info(f"RemoteExecutionNode '{self.name}' disconnected.")
+        await super().cleanup()
+
+    async def process(self, data_stream: AsyncGenerator[Any, None]) -> AsyncGenerator[Any, None]:
+        """
+        Sends a stream of data to the remote service for execution and yields the results.
+        """
+        if not self.client or not self.client.stub:
+            raise NodeError("Remote client not initialized or connected.")
+
+        logger.debug(f"RemoteExecutionNode '{self.name}': starting stream to remote for node '{self.node_to_execute}'")
+
+        try:
+            async for result in self.client.stream_node(
+                node_type=self.node_to_execute,
+                config=self.node_config,
+                input_stream=data_stream,
+                serialization_format=self.serialization_format
+            ):
+                yield result
+        except Exception as e:
+            logger.error(f"RemoteExecutionNode '{self.name}': Failed to stream remote node '{self.node_to_execute}'. Error: {e}")
+            # The exception will be propagated by the pipeline
+            raise
+
+
+class RemoteObjectExecutionNode(Node):
+    """
+    A node that executes a cloudpickled Python object on a remote server.
+    """
+    def __init__(self, obj_to_execute: Any, remote_config: RemoteExecutorConfig, node_config: Optional[Dict[str, Any]] = None, **kwargs):
+        super().__init__(**kwargs)
+        if not all(hasattr(obj_to_execute, attr) for attr in ['initialize', 'process', 'cleanup']):
+            raise ValueError("The object to execute must have initialize, process, and cleanup methods.")
+            
+        self.obj_to_execute = obj_to_execute
+        self.remote_config = remote_config
+        self.node_config = node_config or {}
+        self.client: Optional[RemoteExecutionClient] = None
+        self.is_streaming = True
+
+    async def initialize(self):
+        """Initializes the remote execution client."""
+        await super().initialize()
+        self.client = RemoteExecutionClient(self.remote_config)
+        await self.client.connect()
+
+    async def cleanup(self):
+        """Disconnects the remote execution client."""
+        if self.client:
+            await self.client.disconnect()
+            self.client = None
+        await super().cleanup()
+
+    async def process(self, data_stream: AsyncGenerator[Any, None]) -> AsyncGenerator[Any, None]:
+        """Streams data to the remote object for processing."""
+        if not self.client:
+            raise NodeError("Remote client not initialized.")
+        
+        try:
+            async for result in self.client.stream_object(
+                obj=self.obj_to_execute,
+                config=self.node_config,
+                input_stream=data_stream
+            ):
+                yield result
+        except Exception as e:
+            self.logger.error(f"Error streaming object remotely: {e}")
+            raise NodeError("Remote object stream failed") from e
+
+
+__all__ = ["RemoteExecutionNode", "RemoteObjectExecutionNode"] 

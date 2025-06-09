@@ -14,7 +14,7 @@ import signal
 import sys
 import time
 from concurrent import futures
-from typing import Dict, Any
+from typing import Dict, Any, AsyncIterable, AsyncGenerator
 
 import grpc
 from grpc_health.v1 import health_pb2_grpc
@@ -29,6 +29,10 @@ import types_pb2
 from config import ServiceConfig
 from executor import TaskExecutor
 from sandbox import SandboxManager
+import inspect
+from remotemedia.core.node import Node
+from remotemedia.serialization import PickleSerializer, JSONSerializer
+import cloudpickle
 
 
 class RemoteExecutionServicer(execution_pb2_grpc.RemoteExecutionServiceServicer):
@@ -169,57 +173,175 @@ class RemoteExecutionServicer(execution_pb2_grpc.RemoteExecutionServiceServicer)
                 metrics=self._build_error_metrics(start_time)
             )
     
-    async def StreamExecute(
+    async def StreamObject(
         self,
-        request_iterator,
+        request_iterator: AsyncIterable[execution_pb2.StreamObjectRequest],
         context: grpc.aio.ServicerContext
-    ):
+    ) -> AsyncGenerator[execution_pb2.StreamObjectResponse, None]:
         """
-        Handle bidirectional streaming execution.
-        
-        Args:
-            request_iterator: Stream of execution requests
-            context: gRPC context
-            
-        Yields:
-            Stream of execution responses
+        Handle bidirectional streaming for a serialized object.
         """
-        self.logger.info("Starting streaming execution session")
+        self.logger.info("New StreamObject connection opened.")
+        obj = None
         
-        session_id = None
         try:
-            async for request in request_iterator:
-                if request.HasField('init'):
-                    # Initialize streaming session
-                    session_id = await self._handle_stream_init(request.init)
-                    yield execution_pb2.StreamExecuteResponse(
-                        init=execution_pb2.StreamInitResponse(
-                            session_id=session_id,
-                            status=types_pb2.EXECUTION_STATUS_SUCCESS
-                        )
-                    )
-                elif request.HasField('data'):
-                    # Process data in streaming session
-                    response = await self._handle_stream_data(request.data)
-                    yield execution_pb2.StreamExecuteResponse(data=response)
-                elif request.HasField('close'):
-                    # Close streaming session
-                    response = await self._handle_stream_close(request.close)
-                    yield execution_pb2.StreamExecuteResponse(close=response)
-                    break
-                    
+            # First message is initialization
+            init_request_data = await anext(request_iterator)
+            if not init_request_data.HasField("init"):
+                yield execution_pb2.StreamObjectResponse(error="Stream must be initialized with a StreamObjectInit message.")
+                return
+
+            init_request = init_request_data.init
+            
+            try:
+                obj = cloudpickle.loads(init_request.serialized_object)
+            except Exception as e:
+                self.logger.error(f"Failed to deserialize object: {e}")
+                yield execution_pb2.StreamObjectResponse(error=f"Failed to deserialize object: {e}")
+                return
+
+            # Check for required methods
+            if not hasattr(obj, 'initialize') or not hasattr(obj, 'process') or not hasattr(obj, 'cleanup'):
+                 yield execution_pb2.StreamObjectResponse(error="Serialized object must have initialize, process, and cleanup methods.")
+                 return
+
+            await obj.initialize()
+
+            serialization_format = init_request.serialization_format
+            if serialization_format == 'pickle':
+                serializer = PickleSerializer()
+            elif serialization_format == 'json':
+                serializer = JSONSerializer()
+            else:
+                 yield execution_pb2.StreamObjectResponse(error=f"Unsupported serialization format: {serialization_format}")
+                 return
+
+            async def input_stream_generator():
+                async for req in request_iterator:
+                    if req.HasField("data"):
+                        yield serializer.deserialize(req.data)
+
+            # Assumes obj.process is an async generator
+            async for result in obj.process(input_stream_generator()):
+                serialized_result = serializer.serialize(result)
+                yield execution_pb2.StreamObjectResponse(data=serialized_result)
+
         except Exception as e:
-            self.logger.error(f"Error in streaming session {session_id}: {e}")
-            yield execution_pb2.StreamExecuteResponse(
-                error=execution_pb2.StreamErrorResponse(
-                    session_id=session_id or "unknown",
-                    error_message=str(e),
-                    error_traceback=self._get_traceback()
-                )
-            )
+            self.logger.error(f"Error during StreamObject execution: {e}")
+            yield execution_pb2.StreamObjectResponse(error=f"Error during execution: {e}")
         finally:
-            if session_id and session_id in self.active_sessions:
-                del self.active_sessions[session_id]
+            if obj and hasattr(obj, 'cleanup'):
+                await obj.cleanup()
+            self.logger.info("StreamObject connection closed.")
+    
+    async def StreamNode(
+        self,
+        request_iterator: AsyncIterable[execution_pb2.StreamData],
+        context: grpc.aio.ServicerContext
+    ) -> AsyncGenerator[execution_pb2.StreamData, None]:
+        """
+        Handle bidirectional streaming for a single node.
+        
+        The first message from the client must contain the `init` payload
+        to configure the node for the stream.
+        """
+        self.logger.info("New StreamNode connection opened.")
+        node = None
+        
+        try:
+            # The first message is the initialization message
+            init_request_data = await anext(request_iterator)
+            if not init_request_data.HasField("init"):
+                context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
+                context.set_details("Stream must be initialized with a StreamInit message.")
+                return
+
+            init_request = init_request_data.init
+            node_type = init_request.node_type
+            
+            # Convert config values back to their likely types
+            config = {}
+            for k, v in init_request.config.items():
+                try:
+                    config[k] = int(v)
+                except ValueError:
+                    try:
+                        config[k] = float(v)
+                    except ValueError:
+                        if v.lower() in ['true', 'false']:
+                            config[k] = v.lower() == 'true'
+                        else:
+                            config[k] = v
+
+            serialization_format = init_request.serialization_format
+
+            self.logger.info(f"Stream initialized for node type '{node_type}' with config {config}")
+
+            # Dynamically create the node instance from the client library
+            # This is a simplification; a real service would have a more robust
+            # and secure way of mapping node_type to a class.
+            from remotemedia.nodes import __all__ as all_nodes
+            from remotemedia import nodes
+
+            if node_type not in all_nodes:
+                raise ValueError(f"Node type '{node_type}' is not supported for remote execution.")
+            
+            NodeClass = getattr(nodes, node_type)
+            node = NodeClass(**config)
+            await node.initialize()
+
+            # Get the correct serializer
+            if serialization_format == 'pickle':
+                serializer = PickleSerializer()
+            elif serialization_format == 'json':
+                serializer = JSONSerializer()
+            else:
+                raise ValueError(f"Unsupported serialization format: {serialization_format}")
+
+            async def input_stream_generator():
+                """Reads from the client stream and yields deserialized data."""
+                async for req in request_iterator:
+                    if req.HasField("data"):
+                        yield serializer.deserialize(req.data)
+                    else:
+                        self.logger.warning("Received non-data message in stream, ignoring.")
+
+            # Check if the node's process method is a streaming one
+            if inspect.isasyncgenfunction(node.process):
+                # It's a streaming node, so we pass the generator
+                async for result in node.process(input_stream_generator()):
+                    serialized_result = serializer.serialize(result)
+                    yield execution_pb2.StreamData(data=serialized_result)
+            else:
+                # It's a standard node, process item by item
+                async for item in input_stream_generator():
+                    if inspect.iscoroutinefunction(node.process):
+                        result = await node.process(item)
+                    else:
+                        result = node.process(item)
+                    if result is not None:
+                        serialized_result = serializer.serialize(result)
+                        yield execution_pb2.StreamData(data=serialized_result)
+
+            # After the stream is done, flush the node if possible
+            if hasattr(node, 'flush') and callable(getattr(node, 'flush')):
+                if inspect.iscoroutinefunction(node.flush):
+                    flushed_result = await node.flush()
+                else:
+                    flushed_result = node.flush()
+                if flushed_result is not None:
+                    serialized_result = serializer.serialize(flushed_result)
+                    yield execution_pb2.StreamData(data=serialized_result)
+
+        except Exception as e:
+            self.logger.error(f"Error during StreamNode execution: {e}", exc_info=True)
+            # Send an error message back to the client
+            yield execution_pb2.StreamData(error_message=f"Error on server: {e}")
+        
+        finally:
+            if node and hasattr(node, 'cleanup'):
+                await node.cleanup()
+            self.logger.info("StreamNode connection closed.")
     
     async def GetStatus(
         self,
@@ -368,7 +490,7 @@ async def serve():
     health_pb2_grpc.add_HealthServicer_to_server(HealthServicer(), server)
     
     # Configure server
-    listen_addr = f'[::]:{config.grpc_port}'
+    listen_addr = f'127.0.0.1:{config.grpc_port}'
     server.add_insecure_port(listen_addr)
     
     # Start server

@@ -10,6 +10,7 @@ import subprocess
 import tempfile
 import os
 import shutil
+import sys
 from typing import Dict, Any, Optional, List
 from dataclasses import dataclass
 
@@ -28,41 +29,50 @@ class SandboxResult:
 
 class SandboxManager:
     """
-    Manages sandboxed execution environments.
+    Manages sandboxed execution environments for user-defined code.
+    
+    This class is responsible for creating, managing, and cleaning up
+    sandboxed environments using technologies like bubblewrap on Linux.
     """
     
     def __init__(self, config: ServiceConfig):
         """
-        Initialize the sandbox manager.
+        Initialize the SandboxManager.
         
         Args:
-            config: Service configuration
+            config: The service configuration.
         """
         self.config = config
         self.logger = logging.getLogger(__name__)
         
-        # Validate sandbox configuration
         self._validate_sandbox_config()
         
-        self.logger.info(f"SandboxManager initialized with {config.sandbox_type}")
+        if self.config.sandbox_enabled:
+            self.logger.info(f"SandboxManager initialized in '{self.config.sandbox_type}' mode.")
+        else:
+            self.logger.info("SandboxManager is disabled.")
     
     def _validate_sandbox_config(self) -> None:
-        """Validate sandbox configuration and availability."""
+        """
+        Validate the configuration required for the chosen sandbox mode.
+        """
         if not self.config.sandbox_enabled:
-            self.logger.warning("Sandboxing is disabled - this is not secure!")
+            self.logger.warning("Sandboxing is disabled by config.")
             return
-        
+
+        if sys.platform != "linux":
+            self.logger.warning(
+                f"Sandbox type '{self.config.sandbox_type}' is not supported on "
+                f"'{sys.platform}'. Disabling sandboxing."
+            )
+            self.config.sandbox_enabled = False
+            return
+
         if self.config.sandbox_type == "bubblewrap":
             if not shutil.which("bwrap"):
+                self.logger.error("bubblewrap (bwrap) not found in PATH, but sandbox mode is enabled.")
                 raise RuntimeError("bubblewrap (bwrap) not found in PATH")
-        elif self.config.sandbox_type == "firejail":
-            if not shutil.which("firejail"):
-                raise RuntimeError("firejail not found in PATH")
-        elif self.config.sandbox_type == "docker":
-            if not shutil.which("docker"):
-                raise RuntimeError("docker not found in PATH")
-        elif self.config.sandbox_type != "none":
-            raise ValueError(f"Unknown sandbox type: {self.config.sandbox_type}")
+        # Add checks for other sandbox types if needed, e.g., firejail, docker
     
     async def execute_in_sandbox(
         self,

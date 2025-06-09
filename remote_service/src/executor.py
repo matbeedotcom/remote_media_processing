@@ -202,7 +202,7 @@ class TaskExecutor:
             
             # Initialize node (if method exists)
             if hasattr(node, 'initialize'):
-                node.initialize()
+                await node.initialize()
             
             # Execute node
             output_obj = node.process(input_obj)
@@ -213,7 +213,7 @@ class TaskExecutor:
             
             # Clean up node (if method exists)
             if hasattr(node, 'cleanup'):
-                node.cleanup()
+                await node.cleanup()
             
             execution_time = int((time.time() - start_time) * 1000)
             

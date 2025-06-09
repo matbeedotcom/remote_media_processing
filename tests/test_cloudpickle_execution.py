@@ -126,7 +126,7 @@ async def test_simple_calculator():
     
     config = RemoteExecutorConfig(
         host='localhost', 
-        port=50051, 
+        port=50052, 
         protocol='grpc', 
         timeout=30.0, 
         ssl_enabled=False
@@ -191,7 +191,7 @@ async def test_data_processor():
     
     config = RemoteExecutorConfig(
         host='localhost', 
-        port=50051, 
+        port=50052, 
         protocol='grpc', 
         timeout=30.0, 
         ssl_enabled=False
@@ -249,7 +249,7 @@ async def test_stateful_execution():
     
     config = RemoteExecutorConfig(
         host='localhost', 
-        port=50051, 
+        port=50052, 
         protocol='grpc', 
         timeout=30.0, 
         ssl_enabled=False
@@ -311,7 +311,7 @@ async def test_error_handling():
     
     config = RemoteExecutorConfig(
         host='localhost', 
-        port=50051, 
+        port=50052, 
         protocol='grpc', 
         timeout=30.0, 
         ssl_enabled=False

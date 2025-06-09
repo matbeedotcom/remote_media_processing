@@ -25,7 +25,7 @@ _sym_db = _symbol_database.Default()
 import types_pb2 as types__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0f\x65xecution.proto\x12\x15remotemedia.execution\x1a\x0btypes.proto\"\x89\x02\n\x12\x45xecuteNodeRequest\x12\x11\n\tnode_type\x18\x01 \x01(\t\x12\x45\n\x06\x63onfig\x18\x02 \x03(\x0b\x32\x35.remotemedia.execution.ExecuteNodeRequest.ConfigEntry\x12\x12\n\ninput_data\x18\x03 \x01(\x0c\x12\x1c\n\x14serialization_format\x18\x04 \x01(\t\x12\x38\n\x07options\x18\x05 \x01(\x0b\x32\'.remotemedia.execution.ExecutionOptions\x1a-\n\x0b\x43onfigEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\"\xcc\x01\n\x13\x45xecuteNodeResponse\x12\x36\n\x06status\x18\x01 \x01(\x0e\x32&.remotemedia.execution.ExecutionStatus\x12\x13\n\x0boutput_data\x18\x02 \x01(\x0c\x12\x15\n\rerror_message\x18\x03 \x01(\t\x12\x17\n\x0f\x65rror_traceback\x18\x04 \x01(\t\x12\x38\n\x07metrics\x18\x05 \x01(\x0b\x32\'.remotemedia.execution.ExecutionMetrics\"\xc7\x01\n\x18\x45xecuteCustomTaskRequest\x12\x14\n\x0c\x63ode_package\x18\x01 \x01(\x0c\x12\x13\n\x0b\x65ntry_point\x18\x02 \x01(\t\x12\x12\n\ninput_data\x18\x03 \x01(\x0c\x12\x1c\n\x14serialization_format\x18\x04 \x01(\t\x12\x14\n\x0c\x64\x65pendencies\x18\x05 \x03(\t\x12\x38\n\x07options\x18\x06 \x01(\x0b\x32\'.remotemedia.execution.ExecutionOptions\"\xea\x01\n\x19\x45xecuteCustomTaskResponse\x12\x36\n\x06status\x18\x01 \x01(\x0e\x32&.remotemedia.execution.ExecutionStatus\x12\x13\n\x0boutput_data\x18\x02 \x01(\x0c\x12\x15\n\rerror_message\x18\x03 \x01(\t\x12\x17\n\x0f\x65rror_traceback\x18\x04 \x01(\t\x12\x38\n\x07metrics\x18\x05 \x01(\x0b\x32\'.remotemedia.execution.ExecutionMetrics\x12\x16\n\x0einstalled_deps\x18\x06 \x03(\t\"\xd6\x01\n\x14StreamExecuteRequest\x12\x38\n\x04init\x18\x01 \x01(\x0b\x32(.remotemedia.execution.StreamInitRequestH\x00\x12\x38\n\x04\x64\x61ta\x18\x02 \x01(\x0b\x32(.remotemedia.execution.StreamDataRequestH\x00\x12:\n\x05\x63lose\x18\x03 \x01(\x0b\x32).remotemedia.execution.StreamCloseRequestH\x00\x42\x0e\n\x0crequest_type\"\x98\x02\n\x15StreamExecuteResponse\x12\x39\n\x04init\x18\x01 \x01(\x0b\x32).remotemedia.execution.StreamInitResponseH\x00\x12\x39\n\x04\x64\x61ta\x18\x02 \x01(\x0b\x32).remotemedia.execution.StreamDataResponseH\x00\x12;\n\x05\x65rror\x18\x03 \x01(\x0b\x32*.remotemedia.execution.StreamErrorResponseH\x00\x12;\n\x05\x63lose\x18\x04 \x01(\x0b\x32*.remotemedia.execution.StreamCloseResponseH\x00\x42\x0f\n\rresponse_type\"\xeb\x01\n\x11StreamInitRequest\x12\x11\n\tnode_type\x18\x01 \x01(\t\x12\x44\n\x06\x63onfig\x18\x02 \x03(\x0b\x32\x34.remotemedia.execution.StreamInitRequest.ConfigEntry\x12\x14\n\x0c\x63ode_package\x18\x03 \x01(\x0c\x12\x38\n\x07options\x18\x04 \x01(\x0b\x32\'.remotemedia.execution.ExecutionOptions\x1a-\n\x0b\x43onfigEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\"w\n\x12StreamInitResponse\x12\x12\n\nsession_id\x18\x01 \x01(\t\x12\x36\n\x06status\x18\x02 \x01(\x0e\x32&.remotemedia.execution.ExecutionStatus\x12\x15\n\rerror_message\x18\x03 \x01(\t\"Y\n\x11StreamDataRequest\x12\x12\n\nsession_id\x18\x01 \x01(\t\x12\x12\n\ninput_data\x18\x02 \x01(\x0c\x12\x1c\n\x14serialization_format\x18\x03 \x01(\t\"w\n\x12StreamDataResponse\x12\x12\n\nsession_id\x18\x01 \x01(\t\x12\x13\n\x0boutput_data\x18\x02 \x01(\x0c\x12\x38\n\x07metrics\x18\x03 \x01(\x0b\x32\'.remotemedia.execution.ExecutionMetrics\"Y\n\x13StreamErrorResponse\x12\x12\n\nsession_id\x18\x01 \x01(\t\x12\x15\n\rerror_message\x18\x02 \x01(\t\x12\x17\n\x0f\x65rror_traceback\x18\x03 \x01(\t\"(\n\x12StreamCloseRequest\x12\x12\n\nsession_id\x18\x01 \x01(\t\"i\n\x13StreamCloseResponse\x12\x12\n\nsession_id\x18\x01 \x01(\t\x12>\n\rtotal_metrics\x18\x02 \x01(\x0b\x32\'.remotemedia.execution.ExecutionMetrics\"B\n\rStatusRequest\x12\x17\n\x0finclude_metrics\x18\x01 \x01(\x08\x12\x18\n\x10include_sessions\x18\x02 \x01(\x08\"\xe4\x01\n\x0eStatusResponse\x12\x34\n\x06status\x18\x01 \x01(\x0e\x32$.remotemedia.execution.ServiceStatus\x12\x36\n\x07metrics\x18\x02 \x01(\x0b\x32%.remotemedia.execution.ServiceMetrics\x12;\n\x0f\x61\x63tive_sessions\x18\x03 \x03(\x0b\x32\".remotemedia.execution.SessionInfo\x12\x0f\n\x07version\x18\x04 \x01(\t\x12\x16\n\x0euptime_seconds\x18\x05 \x01(\x03\"$\n\x10ListNodesRequest\x12\x10\n\x08\x63\x61tegory\x18\x01 \x01(\t\"M\n\x11ListNodesResponse\x12\x38\n\x0f\x61vailable_nodes\x18\x01 \x03(\x0b\x32\x1f.remotemedia.execution.NodeInfo\"~\n\x08NodeInfo\x12\x11\n\tnode_type\x18\x01 \x01(\t\x12\x10\n\x08\x63\x61tegory\x18\x02 \x01(\t\x12\x13\n\x0b\x64\x65scription\x18\x03 \x01(\t\x12\x38\n\nparameters\x18\x04 \x03(\x0b\x32$.remotemedia.execution.ParameterInfo\"i\n\rParameterInfo\x12\x0c\n\x04name\x18\x01 \x01(\t\x12\x0c\n\x04type\x18\x02 \x01(\t\x12\x13\n\x0b\x64\x65scription\x18\x03 \x01(\t\x12\x10\n\x08required\x18\x04 \x01(\x08\x12\x15\n\rdefault_value\x18\x05 \x01(\t\"\x7f\n\x0bSessionInfo\x12\x12\n\nsession_id\x18\x01 \x01(\t\x12\x11\n\tnode_type\x18\x02 \x01(\t\x12\x19\n\x11\x63reated_timestamp\x18\x03 \x01(\x03\x12\x15\n\rlast_activity\x18\x04 \x01(\x03\x12\x17\n\x0fprocessed_items\x18\x05 \x01(\x05\x32\xa0\x04\n\x16RemoteExecutionService\x12\x64\n\x0b\x45xecuteNode\x12).remotemedia.execution.ExecuteNodeRequest\x1a*.remotemedia.execution.ExecuteNodeResponse\x12v\n\x11\x45xecuteCustomTask\x12/.remotemedia.execution.ExecuteCustomTaskRequest\x1a\x30.remotemedia.execution.ExecuteCustomTaskResponse\x12n\n\rStreamExecute\x12+.remotemedia.execution.StreamExecuteRequest\x1a,.remotemedia.execution.StreamExecuteResponse(\x01\x30\x01\x12X\n\tGetStatus\x12$.remotemedia.execution.StatusRequest\x1a%.remotemedia.execution.StatusResponse\x12^\n\tListNodes\x12\'.remotemedia.execution.ListNodesRequest\x1a(.remotemedia.execution.ListNodesResponseb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0f\x65xecution.proto\x12\x15remotemedia.execution\x1a\x0btypes.proto\"\x89\x02\n\x12\x45xecuteNodeRequest\x12\x11\n\tnode_type\x18\x01 \x01(\t\x12\x45\n\x06\x63onfig\x18\x02 \x03(\x0b\x32\x35.remotemedia.execution.ExecuteNodeRequest.ConfigEntry\x12\x12\n\ninput_data\x18\x03 \x01(\x0c\x12\x1c\n\x14serialization_format\x18\x04 \x01(\t\x12\x38\n\x07options\x18\x05 \x01(\x0b\x32\'.remotemedia.execution.ExecutionOptions\x1a-\n\x0b\x43onfigEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\"\xcc\x01\n\x13\x45xecuteNodeResponse\x12\x36\n\x06status\x18\x01 \x01(\x0e\x32&.remotemedia.execution.ExecutionStatus\x12\x13\n\x0boutput_data\x18\x02 \x01(\x0c\x12\x15\n\rerror_message\x18\x03 \x01(\t\x12\x17\n\x0f\x65rror_traceback\x18\x04 \x01(\t\x12\x38\n\x07metrics\x18\x05 \x01(\x0b\x32\'.remotemedia.execution.ExecutionMetrics\"\xc7\x01\n\x18\x45xecuteCustomTaskRequest\x12\x14\n\x0c\x63ode_package\x18\x01 \x01(\x0c\x12\x13\n\x0b\x65ntry_point\x18\x02 \x01(\t\x12\x12\n\ninput_data\x18\x03 \x01(\x0c\x12\x1c\n\x14serialization_format\x18\x04 \x01(\t\x12\x14\n\x0c\x64\x65pendencies\x18\x05 \x03(\t\x12\x38\n\x07options\x18\x06 \x01(\x0b\x32\'.remotemedia.execution.ExecutionOptions\"\xea\x01\n\x19\x45xecuteCustomTaskResponse\x12\x36\n\x06status\x18\x01 \x01(\x0e\x32&.remotemedia.execution.ExecutionStatus\x12\x13\n\x0boutput_data\x18\x02 \x01(\x0c\x12\x15\n\rerror_message\x18\x03 \x01(\t\x12\x17\n\x0f\x65rror_traceback\x18\x04 \x01(\t\x12\x38\n\x07metrics\x18\x05 \x01(\x0b\x32\'.remotemedia.execution.ExecutionMetrics\x12\x16\n\x0einstalled_deps\x18\x06 \x03(\t\"q\n\nStreamData\x12\x31\n\x04init\x18\x01 \x01(\x0b\x32!.remotemedia.execution.StreamInitH\x00\x12\x0e\n\x04\x64\x61ta\x18\x02 \x01(\x0cH\x00\x12\x15\n\rerror_message\x18\n \x01(\tB\t\n\x07payload\"\xab\x01\n\nStreamInit\x12\x11\n\tnode_type\x18\x01 \x01(\t\x12=\n\x06\x63onfig\x18\x02 \x03(\x0b\x32-.remotemedia.execution.StreamInit.ConfigEntry\x12\x1c\n\x14serialization_format\x18\x03 \x01(\t\x1a-\n\x0b\x43onfigEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\"i\n\x13StreamObjectRequest\x12\x37\n\x04init\x18\x01 \x01(\x0b\x32\'.remotemedia.execution.StreamObjectInitH\x00\x12\x0e\n\x04\x64\x61ta\x18\x02 \x01(\x0cH\x00\x42\t\n\x07payload\"B\n\x14StreamObjectResponse\x12\x0e\n\x04\x64\x61ta\x18\x01 \x01(\x0cH\x00\x12\x0f\n\x05\x65rror\x18\x02 \x01(\tH\x00\x42\t\n\x07payload\"\xbf\x01\n\x10StreamObjectInit\x12\x19\n\x11serialized_object\x18\x01 \x01(\x0c\x12\x43\n\x06\x63onfig\x18\x02 \x03(\x0b\x32\x33.remotemedia.execution.StreamObjectInit.ConfigEntry\x12\x1c\n\x14serialization_format\x18\x03 \x01(\t\x1a-\n\x0b\x43onfigEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\"i\n\x13StreamCloseResponse\x12\x12\n\nsession_id\x18\x01 \x01(\t\x12>\n\rtotal_metrics\x18\x02 \x01(\x0b\x32\'.remotemedia.execution.ExecutionMetrics\"B\n\rStatusRequest\x12\x17\n\x0finclude_metrics\x18\x01 \x01(\x08\x12\x18\n\x10include_sessions\x18\x02 \x01(\x08\"\xe4\x01\n\x0eStatusResponse\x12\x34\n\x06status\x18\x01 \x01(\x0e\x32$.remotemedia.execution.ServiceStatus\x12\x36\n\x07metrics\x18\x02 \x01(\x0b\x32%.remotemedia.execution.ServiceMetrics\x12;\n\x0f\x61\x63tive_sessions\x18\x03 \x03(\x0b\x32\".remotemedia.execution.SessionInfo\x12\x0f\n\x07version\x18\x04 \x01(\t\x12\x16\n\x0euptime_seconds\x18\x05 \x01(\x03\"$\n\x10ListNodesRequest\x12\x10\n\x08\x63\x61tegory\x18\x01 \x01(\t\"M\n\x11ListNodesResponse\x12\x38\n\x0f\x61vailable_nodes\x18\x01 \x03(\x0b\x32\x1f.remotemedia.execution.NodeInfo\"~\n\x08NodeInfo\x12\x11\n\tnode_type\x18\x01 \x01(\t\x12\x10\n\x08\x63\x61tegory\x18\x02 \x01(\t\x12\x13\n\x0b\x64\x65scription\x18\x03 \x01(\t\x12\x38\n\nparameters\x18\x04 \x03(\x0b\x32$.remotemedia.execution.ParameterInfo\"i\n\rParameterInfo\x12\x0c\n\x04name\x18\x01 \x01(\t\x12\x0c\n\x04type\x18\x02 \x01(\t\x12\x13\n\x0b\x64\x65scription\x18\x03 \x01(\t\x12\x10\n\x08required\x18\x04 \x01(\x08\x12\x15\n\rdefault_value\x18\x05 \x01(\t\"\x7f\n\x0bSessionInfo\x12\x12\n\nsession_id\x18\x01 \x01(\t\x12\x11\n\tnode_type\x18\x02 \x01(\t\x12\x19\n\x11\x63reated_timestamp\x18\x03 \x01(\x03\x12\x15\n\rlast_activity\x18\x04 \x01(\x03\x12\x17\n\x0fprocessed_items\x18\x05 \x01(\x05\x32\xf5\x04\n\x16RemoteExecutionService\x12\x64\n\x0b\x45xecuteNode\x12).remotemedia.execution.ExecuteNodeRequest\x1a*.remotemedia.execution.ExecuteNodeResponse\x12v\n\x11\x45xecuteCustomTask\x12/.remotemedia.execution.ExecuteCustomTaskRequest\x1a\x30.remotemedia.execution.ExecuteCustomTaskResponse\x12V\n\nStreamNode\x12!.remotemedia.execution.StreamData\x1a!.remotemedia.execution.StreamData(\x01\x30\x01\x12k\n\x0cStreamObject\x12*.remotemedia.execution.StreamObjectRequest\x1a+.remotemedia.execution.StreamObjectResponse(\x01\x30\x01\x12X\n\tGetStatus\x12$.remotemedia.execution.StatusRequest\x1a%.remotemedia.execution.StatusResponse\x12^\n\tListNodes\x12\'.remotemedia.execution.ListNodesRequest\x1a(.remotemedia.execution.ListNodesResponseb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -34,8 +34,10 @@ if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
   _globals['_EXECUTENODEREQUEST_CONFIGENTRY']._loaded_options = None
   _globals['_EXECUTENODEREQUEST_CONFIGENTRY']._serialized_options = b'8\001'
-  _globals['_STREAMINITREQUEST_CONFIGENTRY']._loaded_options = None
-  _globals['_STREAMINITREQUEST_CONFIGENTRY']._serialized_options = b'8\001'
+  _globals['_STREAMINIT_CONFIGENTRY']._loaded_options = None
+  _globals['_STREAMINIT_CONFIGENTRY']._serialized_options = b'8\001'
+  _globals['_STREAMOBJECTINIT_CONFIGENTRY']._loaded_options = None
+  _globals['_STREAMOBJECTINIT_CONFIGENTRY']._serialized_options = b'8\001'
   _globals['_EXECUTENODEREQUEST']._serialized_start=56
   _globals['_EXECUTENODEREQUEST']._serialized_end=321
   _globals['_EXECUTENODEREQUEST_CONFIGENTRY']._serialized_start=276
@@ -46,40 +48,36 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_EXECUTECUSTOMTASKREQUEST']._serialized_end=730
   _globals['_EXECUTECUSTOMTASKRESPONSE']._serialized_start=733
   _globals['_EXECUTECUSTOMTASKRESPONSE']._serialized_end=967
-  _globals['_STREAMEXECUTEREQUEST']._serialized_start=970
-  _globals['_STREAMEXECUTEREQUEST']._serialized_end=1184
-  _globals['_STREAMEXECUTERESPONSE']._serialized_start=1187
-  _globals['_STREAMEXECUTERESPONSE']._serialized_end=1467
-  _globals['_STREAMINITREQUEST']._serialized_start=1470
-  _globals['_STREAMINITREQUEST']._serialized_end=1705
-  _globals['_STREAMINITREQUEST_CONFIGENTRY']._serialized_start=276
-  _globals['_STREAMINITREQUEST_CONFIGENTRY']._serialized_end=321
-  _globals['_STREAMINITRESPONSE']._serialized_start=1707
-  _globals['_STREAMINITRESPONSE']._serialized_end=1826
-  _globals['_STREAMDATAREQUEST']._serialized_start=1828
-  _globals['_STREAMDATAREQUEST']._serialized_end=1917
-  _globals['_STREAMDATARESPONSE']._serialized_start=1919
-  _globals['_STREAMDATARESPONSE']._serialized_end=2038
-  _globals['_STREAMERRORRESPONSE']._serialized_start=2040
-  _globals['_STREAMERRORRESPONSE']._serialized_end=2129
-  _globals['_STREAMCLOSEREQUEST']._serialized_start=2131
-  _globals['_STREAMCLOSEREQUEST']._serialized_end=2171
-  _globals['_STREAMCLOSERESPONSE']._serialized_start=2173
-  _globals['_STREAMCLOSERESPONSE']._serialized_end=2278
-  _globals['_STATUSREQUEST']._serialized_start=2280
-  _globals['_STATUSREQUEST']._serialized_end=2346
-  _globals['_STATUSRESPONSE']._serialized_start=2349
-  _globals['_STATUSRESPONSE']._serialized_end=2577
-  _globals['_LISTNODESREQUEST']._serialized_start=2579
-  _globals['_LISTNODESREQUEST']._serialized_end=2615
-  _globals['_LISTNODESRESPONSE']._serialized_start=2617
-  _globals['_LISTNODESRESPONSE']._serialized_end=2694
-  _globals['_NODEINFO']._serialized_start=2696
-  _globals['_NODEINFO']._serialized_end=2822
-  _globals['_PARAMETERINFO']._serialized_start=2824
-  _globals['_PARAMETERINFO']._serialized_end=2929
-  _globals['_SESSIONINFO']._serialized_start=2931
-  _globals['_SESSIONINFO']._serialized_end=3058
-  _globals['_REMOTEEXECUTIONSERVICE']._serialized_start=3061
-  _globals['_REMOTEEXECUTIONSERVICE']._serialized_end=3605
+  _globals['_STREAMDATA']._serialized_start=969
+  _globals['_STREAMDATA']._serialized_end=1082
+  _globals['_STREAMINIT']._serialized_start=1085
+  _globals['_STREAMINIT']._serialized_end=1256
+  _globals['_STREAMINIT_CONFIGENTRY']._serialized_start=276
+  _globals['_STREAMINIT_CONFIGENTRY']._serialized_end=321
+  _globals['_STREAMOBJECTREQUEST']._serialized_start=1258
+  _globals['_STREAMOBJECTREQUEST']._serialized_end=1363
+  _globals['_STREAMOBJECTRESPONSE']._serialized_start=1365
+  _globals['_STREAMOBJECTRESPONSE']._serialized_end=1431
+  _globals['_STREAMOBJECTINIT']._serialized_start=1434
+  _globals['_STREAMOBJECTINIT']._serialized_end=1625
+  _globals['_STREAMOBJECTINIT_CONFIGENTRY']._serialized_start=276
+  _globals['_STREAMOBJECTINIT_CONFIGENTRY']._serialized_end=321
+  _globals['_STREAMCLOSERESPONSE']._serialized_start=1627
+  _globals['_STREAMCLOSERESPONSE']._serialized_end=1732
+  _globals['_STATUSREQUEST']._serialized_start=1734
+  _globals['_STATUSREQUEST']._serialized_end=1800
+  _globals['_STATUSRESPONSE']._serialized_start=1803
+  _globals['_STATUSRESPONSE']._serialized_end=2031
+  _globals['_LISTNODESREQUEST']._serialized_start=2033
+  _globals['_LISTNODESREQUEST']._serialized_end=2069
+  _globals['_LISTNODESRESPONSE']._serialized_start=2071
+  _globals['_LISTNODESRESPONSE']._serialized_end=2148
+  _globals['_NODEINFO']._serialized_start=2150
+  _globals['_NODEINFO']._serialized_end=2276
+  _globals['_PARAMETERINFO']._serialized_start=2278
+  _globals['_PARAMETERINFO']._serialized_end=2383
+  _globals['_SESSIONINFO']._serialized_start=2385
+  _globals['_SESSIONINFO']._serialized_end=2512
+  _globals['_REMOTEEXECUTIONSERVICE']._serialized_start=2515
+  _globals['_REMOTEEXECUTIONSERVICE']._serialized_end=3144
 # @@protoc_insertion_point(module_scope)

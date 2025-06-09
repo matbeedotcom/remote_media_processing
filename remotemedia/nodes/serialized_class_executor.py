@@ -8,6 +8,7 @@ serialized using cloudpickle, as specified in the development strategy document.
 from typing import Any, Dict
 import logging
 import base64
+import cloudpickle
 
 from ..core.node import Node
 
@@ -64,17 +65,23 @@ class SerializedClassExecutorNode(Node):
         method_kwargs = data.get('method_kwargs', {})
         
         try:
-            result = self._execute_serialized_method(
-                serialized_object, method_name, method_args, method_kwargs
+            # Import cloudpickle dynamically
+            try:
+                import cloudpickle
+            except ImportError:
+                raise ImportError("cloudpickle is required for serialized class execution")
+
+            result, updated_obj = self._execute_serialized_method(
+                serialized_object, method_name, method_args, method_kwargs, cloudpickle
             )
             
+            # Re-serialize the updated object to return its new state
+            updated_serialized_obj = base64.b64encode(cloudpickle.dumps(updated_obj)).decode('ascii')
+
             return {
-                'method_name': method_name,
-                'method_args': method_args,
-                'method_kwargs': method_kwargs,
                 'result': result,
+                'updated_serialized_object': updated_serialized_obj,
                 'processed_by': f'SerializedClassExecutorNode[{self.name}]',
-                'node_config': self.config
             }
             
         except (ValueError, AttributeError, TypeError) as e:
@@ -106,32 +113,27 @@ class SerializedClassExecutorNode(Node):
             }
     
     def _execute_serialized_method(self, serialized_object: str, method_name: str, 
-                                 method_args: list, method_kwargs: dict) -> Any:
+                                 method_args: list, method_kwargs: dict, pickle_lib: Any) -> (Any, Any):
         """
-        Deserialize object and execute method.
+        Deserialize object, execute method, and return result and modified object.
         
         Args:
             serialized_object: Base64-encoded cloudpickle data
             method_name: Name of method to call
             method_args: Arguments for method
             method_kwargs: Keyword arguments for method
+            pickle_lib: The cloudpickle library instance
             
         Returns:
-            Result of method execution
+            A tuple of (result_of_method_execution, modified_object)
             
         Raises:
             Exception: Any exception from deserialization or method execution
         """
-        # Import cloudpickle
-        try:
-            import cloudpickle
-        except ImportError:
-            raise ImportError("cloudpickle is required for serialized class execution")
-        
         # Decode and deserialize the object
         try:
             serialized_data = base64.b64decode(serialized_object.encode('ascii'))
-            obj = cloudpickle.loads(serialized_data)
+            obj = pickle_lib.loads(serialized_data)
         except Exception as e:
             raise ValueError(f"Failed to deserialize object: {e}")
         
@@ -150,7 +152,7 @@ class SerializedClassExecutorNode(Node):
         try:
             result = method(*method_args, **method_kwargs)
             logger.debug(f"Method '{method_name}' executed successfully")
-            return result
+            return result, obj
         except Exception as e:
             # Log the specific exception type for debugging
             logger.debug(f"Method '{method_name}' raised {type(e).__name__}: {e}")

@@ -12,7 +12,7 @@ class ServiceConfig:
     """Configuration for the Remote Execution Service."""
     
     # Server configuration
-    grpc_port: int = 50051
+    grpc_port: int = 50052
     metrics_port: int = 8080
     max_workers: int = 4
     log_level: str = "INFO"

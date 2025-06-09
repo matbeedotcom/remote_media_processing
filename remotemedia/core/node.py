@@ -85,7 +85,7 @@ class Node(ABC):
         """
         pass
     
-    def initialize(self) -> None:
+    async def initialize(self) -> None:
         """
         Initialize the node before processing.
         
@@ -96,18 +96,9 @@ class Node(ABC):
             return
             
         self.logger.debug(f"Initializing node: {self.name}")
-        self._initialize_impl()
         self._is_initialized = True
     
-    def _initialize_impl(self) -> None:
-        """
-        Internal initialization implementation.
-        
-        Override this method in subclasses to provide custom initialization.
-        """
-        pass
-    
-    def cleanup(self) -> None:
+    async def cleanup(self) -> None:
         """
         Clean up resources used by the node.
         
@@ -115,16 +106,7 @@ class Node(ABC):
         Override this method to perform any cleanup required by the node.
         """
         self.logger.debug(f"Cleaning up node: {self.name}")
-        self._cleanup_impl()
         self._is_initialized = False
-    
-    def _cleanup_impl(self) -> None:
-        """
-        Internal cleanup implementation.
-        
-        Override this method in subclasses to provide custom cleanup.
-        """
-        pass
     
     @property
     def is_remote(self) -> bool:

@@ -5,10 +5,17 @@ Source nodes are responsible for introducing data into the pipeline,
 for example by reading from a file, network stream, or hardware device.
 """
 import asyncio
+import logging
 from typing import AsyncGenerator, Any
+
+import numpy as np
+from av import AudioFrame, VideoFrame
+from av.frame import Frame
 
 from ..core.node import Node
 from ..core.exceptions import NodeError
+
+logger = logging.getLogger(__name__)
 
 class MediaReaderNode(Node):
     """
@@ -49,7 +56,7 @@ class MediaReaderNode(Node):
         player = MediaPlayer(self.path)
         
         if player.audio is None and player.video is None:
-            self.logger.warning("No audio or video tracks found in the source.")
+            logger.warning("No audio or video tracks found in the source.")
             return
 
         # We can create a simple multiplexer here to yield frames as they come
@@ -57,15 +64,15 @@ class MediaReaderNode(Node):
         _sentinel = object()
 
         async def track_reader(track, track_type):
-            self.logger.info(f"Starting reader for {track_type} track.")
+            logger.info(f"Starting reader for {track_type} track.")
             try:
                 while True:
                     try:
                         frame = await track.recv()
-                        self.logger.debug(f"Received {track_type} frame: {frame.pts}")
+                        logger.debug(f"Received {track_type} frame: {frame.pts}")
                         await queue.put({track_type: frame})
                     except MediaStreamError:
-                        self.logger.info(f"{track_type} track finished.")
+                        logger.info(f"{track_type} track finished.")
                         break
             finally:
                 await queue.put(_sentinel)
@@ -81,10 +88,99 @@ class MediaReaderNode(Node):
             item = await queue.get()
             if item is _sentinel:
                 finished_tracks += 1
-                self.logger.info(f"A track reader finished. {finished_tracks}/{len(tasks)} done.")
+                logger.info(f"A track reader finished. {finished_tracks}/{len(tasks)} done.")
             else:
-                self.logger.debug("Yielding frame from queue.")
+                logger.debug("Yielding frame from queue.")
                 yield item
-        self.logger.info("All track readers have finished.")
+        logger.info("All track readers have finished.")
 
-__all__ = ["MediaReaderNode"] 
+
+class TrackSource(Node):
+    """
+    Base class for track source nodes.
+    """
+
+    def process(self, data: Any) -> Any:
+        """
+        Processes an av frame.
+        Expects `data` to be an `av.frame.Frame` (AudioFrame or VideoFrame).
+        """
+        if not isinstance(data, Frame):
+            logger.warning(
+                f"{self.__class__.__name__} '{self.name}': received data in "
+                "unexpected format. Expected an av.frame.Frame."
+            )
+            return None
+        return self._process_frame(data)
+
+    def _process_frame(self, frame: Frame) -> Any:
+        raise NotImplementedError
+
+
+class AudioTrackSource(TrackSource):
+    """
+    An audio track source node that converts `av.AudioFrame` objects into NumPy arrays.
+    """
+
+    def _process_frame(self, frame: AudioFrame) -> Any:
+        """
+        Converts an `av.AudioFrame` to a tuple of (audio_data, sample_rate).
+
+        Args:
+            frame: An `av.AudioFrame`.
+
+        Returns:
+            A tuple `(audio_data, sample_rate)` where `audio_data` is a
+            NumPy array with shape (channels, samples).
+        """
+        try:
+            audio_data = frame.to_ndarray()
+            logger.debug(
+                f"AudioTrackSource '{self.name}': processed audio frame with "
+                f"{frame.samples} samples at {frame.sample_rate}Hz."
+            )
+            return (audio_data, frame.sample_rate)
+        except Exception as e:
+            logger.error(f"Error converting audio frame to numpy array: {e}")
+            return None
+
+
+class VideoTrackSource(TrackSource):
+    """
+    A video track source node that converts `av.VideoFrame` objects into NumPy arrays.
+    """
+
+    def __init__(self, output_format: str = "bgr24", **kwargs):
+        """
+        Initializes the VideoTrackSource node.
+
+        Args:
+            output_format (str): The desired output format for the NumPy array
+                                 (e.g., 'bgr24', 'rgb24').
+        """
+        super().__init__(**kwargs)
+        self.output_format = output_format
+
+    def _process_frame(self, frame: VideoFrame) -> Any:
+        """
+        Converts an `av.VideoFrame` to a NumPy array.
+
+        Args:
+            frame: An `av.VideoFrame`.
+
+        Returns:
+            A NumPy array representing the video frame.
+        """
+        try:
+            video_data = frame.to_ndarray(format=self.output_format)
+            logger.debug(
+                f"VideoTrackSource '{self.name}': processed video frame with "
+                f"resolution {frame.width}x{frame.height}."
+            )
+            return video_data
+        except Exception as e:
+            logger.error(f"Error converting video frame to numpy array: {e}")
+            return None
+
+
+__all__ = ["MediaReaderNode", "AudioTrackSource", "VideoTrackSource", "TrackSource"] 

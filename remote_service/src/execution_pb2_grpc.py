@@ -46,10 +46,15 @@ class RemoteExecutionServiceStub(object):
                 request_serializer=execution__pb2.ExecuteCustomTaskRequest.SerializeToString,
                 response_deserializer=execution__pb2.ExecuteCustomTaskResponse.FromString,
                 _registered_method=True)
-        self.StreamExecute = channel.stream_stream(
-                '/remotemedia.execution.RemoteExecutionService/StreamExecute',
-                request_serializer=execution__pb2.StreamExecuteRequest.SerializeToString,
-                response_deserializer=execution__pb2.StreamExecuteResponse.FromString,
+        self.StreamNode = channel.stream_stream(
+                '/remotemedia.execution.RemoteExecutionService/StreamNode',
+                request_serializer=execution__pb2.StreamData.SerializeToString,
+                response_deserializer=execution__pb2.StreamData.FromString,
+                _registered_method=True)
+        self.StreamObject = channel.stream_stream(
+                '/remotemedia.execution.RemoteExecutionService/StreamObject',
+                request_serializer=execution__pb2.StreamObjectRequest.SerializeToString,
+                response_deserializer=execution__pb2.StreamObjectResponse.FromString,
                 _registered_method=True)
         self.GetStatus = channel.unary_unary(
                 '/remotemedia.execution.RemoteExecutionService/GetStatus',
@@ -82,8 +87,15 @@ class RemoteExecutionServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def StreamExecute(self, request_iterator, context):
-        """Bidirectional streaming execution for real-time processing
+    def StreamNode(self, request_iterator, context):
+        """Bidirectional streaming for real-time processing
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def StreamObject(self, request_iterator, context):
+        """Bidirectional streaming for serialized objects
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -116,10 +128,15 @@ def add_RemoteExecutionServiceServicer_to_server(servicer, server):
                     request_deserializer=execution__pb2.ExecuteCustomTaskRequest.FromString,
                     response_serializer=execution__pb2.ExecuteCustomTaskResponse.SerializeToString,
             ),
-            'StreamExecute': grpc.stream_stream_rpc_method_handler(
-                    servicer.StreamExecute,
-                    request_deserializer=execution__pb2.StreamExecuteRequest.FromString,
-                    response_serializer=execution__pb2.StreamExecuteResponse.SerializeToString,
+            'StreamNode': grpc.stream_stream_rpc_method_handler(
+                    servicer.StreamNode,
+                    request_deserializer=execution__pb2.StreamData.FromString,
+                    response_serializer=execution__pb2.StreamData.SerializeToString,
+            ),
+            'StreamObject': grpc.stream_stream_rpc_method_handler(
+                    servicer.StreamObject,
+                    request_deserializer=execution__pb2.StreamObjectRequest.FromString,
+                    response_serializer=execution__pb2.StreamObjectResponse.SerializeToString,
             ),
             'GetStatus': grpc.unary_unary_rpc_method_handler(
                     servicer.GetStatus,
@@ -199,7 +216,7 @@ class RemoteExecutionService(object):
             _registered_method=True)
 
     @staticmethod
-    def StreamExecute(request_iterator,
+    def StreamNode(request_iterator,
             target,
             options=(),
             channel_credentials=None,
@@ -212,9 +229,36 @@ class RemoteExecutionService(object):
         return grpc.experimental.stream_stream(
             request_iterator,
             target,
-            '/remotemedia.execution.RemoteExecutionService/StreamExecute',
-            execution__pb2.StreamExecuteRequest.SerializeToString,
-            execution__pb2.StreamExecuteResponse.FromString,
+            '/remotemedia.execution.RemoteExecutionService/StreamNode',
+            execution__pb2.StreamData.SerializeToString,
+            execution__pb2.StreamData.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def StreamObject(request_iterator,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.stream_stream(
+            request_iterator,
+            target,
+            '/remotemedia.execution.RemoteExecutionService/StreamObject',
+            execution__pb2.StreamObjectRequest.SerializeToString,
+            execution__pb2.StreamObjectResponse.FromString,
             options,
             channel_credentials,
             insecure,
