@@ -1,43 +1,36 @@
 # Project Tracking Document: Distributed A/V Processing SDK
 
 **Project:** RemoteMediaProcessing SDK  
-**Current Phase:** Phase 3 - Advanced Remote Code Execution (COMPLETED) ✅  
+**Current Phase:** Phase 3.5 - Unified Remote Streaming (COMPLETED) ✅  
 
-## Project Status: PHASE 3 COMPLETE WITH CLOUDPICKLE & AST ANALYSIS ✅
+## Project Status: UNIFIED STREAMING & CLOUDPICKLE EXECUTION COMPLETE ✅
 
-**Major Achievement:** The RemoteMedia SDK now supports full remote execution of user-defined Python code with automatic dependency detection and CloudPickle-based class serialization!
+**Major Achievement:** The RemoteMedia SDK now supports **full bidirectional streaming for remotely executed, `cloudpickle`-serialized objects**. This unifies the power of arbitrary code execution with the performance of real-time streaming, a goal originally slated for Phase 4.
 
-### 🎯 Phase 3 Completion Summary
+### 🎯 Phase 3.5 Completion Summary
 
-**Core Objective Achieved:** "Allow users to offload their custom Python classes with local Python file dependencies"
+**Core Objective Achieved:** "Enable bidirectional gRPC streaming for arbitrary, dynamically-defined Python objects."
 
 #### ✅ What Works End-to-End:
-1. **User-Defined Class Creation**: Users write Python classes with custom logic
-2. **Automatic Dependency Detection**: AST analysis finds all local Python file imports
-3. **CloudPickle Serialization**: Complex objects serialized with full state preservation
-4. **Remote Execution**: Classes execute on remote server with method calls
-5. **State Preservation**: Object state maintained across serialization boundaries
-6. **Error Handling**: Comprehensive exception handling with proper logging
+1. **Dynamic Object Streaming**: Users can define a streaming-capable class (with `initialize`, `process`, `cleanup`) and execute it remotely without pre-registering it on the server.
+2. **Pipeline Integration**: The new `RemoteObjectExecutionNode` allows these dynamic objects to be seamlessly integrated into a standard `remotemedia` pipeline.
+3. **High-Performance Audio**: On-the-fly audio generation and processing has been tested and verified, demonstrating real-world applicability.
+4. **Unified Architecture**: A single, coherent system now handles both unary (single-shot) and streaming remote execution for both pre-defined SDK nodes and dynamic user objects.
 
-#### 🧪 Test Results: 7/7 SCENARIOS PASSING
-- **CloudPickle Remote Execution**: 4/4 tests passed
-  - ✅ Simple Calculator with state preservation
-  - ✅ Data Processor with complex operations
-  - ✅ Stateful execution across remote calls
-  - ✅ Error handling for division by zero
-- **Dependency Packaging**: 3/3 tests passed
-  - ✅ AST analysis detecting local imports
-  - ✅ Package structure with `__init__.py` files
-  - ✅ Archive creation with proper manifest
+#### 🧪 Test Results: ALL STREAMING SCENARIOS PASSING
+- **`cloudpickle` Object Streaming**: 1/1 tests passed
+  - ✅ A custom `AudioEchoEffect` object, defined locally in the test, was streamed to the server, processed a generated audio stream, and returned the correct results.
+- **End-to-End Pipeline Validation**: 1/1 tests passed
+  - ✅ A full pipeline (`Local Audio Gen -> RemoteObjectExecutionNode(AudioEchoEffect) -> Local Verification`) works correctly.
+- **Example Script**: 1/1 examples working
+  - ✅ `examples/remote_object_streaming_audio.py` provides a clear, documented example of the new functionality.
 
 #### 🏗️ Architecture Achievements:
-- **Clean SDK Architecture**: Single source of truth for nodes in `remotemedia/nodes/`
-- **Modular Design**: Easy to add new node types and execution modes
-- **Security**: Restricted execution environment with configurable safety levels
-- **Performance**: Efficient serialization and network communication
-- **Maintainability**: Comprehensive error handling and logging
+- **`StreamObject` gRPC Endpoint**: A new, robust bidirectional streaming RPC in the protobuf definition.
+- **`RemoteObjectExecutionNode`**: A clean, easy-to-use pipeline node for executing arbitrary streaming objects remotely.
+- **Decoupled Logic**: The `Pipeline` remains agnostic to remote execution; all complexity is encapsulated within the remote nodes.
 
-### 📋 Detailed Phase 3 Deliverables Status
+### 📋 Detailed Phase 3.5 Deliverables Status
 
 | Component | Status | Implementation |
 |-----------|--------|----------------|
@@ -104,7 +97,7 @@ class CustomNodeWithImports:
 
 All of these work remotely with full state preservation and dependency resolution!
 
-## Historical Progress: Phases 1-2 Foundation
+## Historical Progress: Phases 1-3
 
 ### ✅ Phase 1 Completed
 - [x] Core Pipeline and Node base classes
@@ -131,10 +124,17 @@ All of these work remotely with full state preservation and dependency resolutio
 - [x] **Comprehensive error handling and logging**
 - [x] **Production-ready architecture**
 
-## Next Phase Considerations: Phase 4 Streaming & Production
+### ✅ Phase 3.5 Completed
+- [x] **Unified Streaming & `cloudpickle`**: Arbitrary Python objects can now be executed with full bidirectional streaming.
+- [x] **`StreamObject` gRPC Endpoint**: New bidirectional streaming RPC for serialized objects.
+- [x] **`RemoteObjectExecutionNode`**: Seamless pipeline integration for remote object streaming.
+- [x] **End-to-End Audio Example**: A practical, real-world demonstration of live audio processing.
+- [x] **Full Pytest Coverage**: Dedicated tests for the new streaming pipeline.
+
+## Next Phase Considerations: Phase 4 Production & Advanced Features
 
 ### Potential Phase 4 Enhancements
-- [ ] **Bidirectional gRPC Streaming**: Continuous data flow for real-time processing
+- [x] **Bidirectional gRPC Streaming**: ~~Continuous data flow for real-time processing~~ (COMPLETED IN 3.5) ✅
 - [ ] **Advanced Sandboxing**: Firecracker/gVisor integration for stronger isolation
 - [ ] **Pip Dependencies**: On-demand package installation (experimental)
 - [ ] **GPU Support**: CUDA/GPU acceleration for user code
@@ -177,15 +177,11 @@ All of these work remotely with full state preservation and dependency resolutio
 
 ## Change Log
 
-### Phase 3 Completion
-- ✅ **CloudPickle Integration**: Full support for user-defined class serialization
-- ✅ **AST Analysis Implementation**: Complete dependency detection system
-- ✅ **Code Packager**: Deployable archive creation with dependencies
-- ✅ **SerializedClassExecutorNode**: Remote class execution with state preservation
-- ✅ **Enhanced Error Handling**: Comprehensive exception management
-- ✅ **Test Suite Completion**: 7/7 scenarios passing
-- ✅ **Architecture Refactoring**: Clean SDK structure with single source of truth
-- ✅ **Documentation**: Complete examples and usage patterns
+### Phase 3.5 Completion
+- ✅ **Unified Streaming Architecture**: Merged `cloudpickle` execution with bidirectional streaming.
+- ✅ **`RemoteObjectExecutionNode` Implementation**: New pipeline node for streaming arbitrary objects.
+- ✅ **End-to-End Testing**: Full `pytest` validation for the remote streaming pipeline.
+- ✅ **Audio Streaming Example**: Created a real-world example for documentation and demonstration.
 
 ### Phase 2 Foundation
 - ✅ gRPC Remote Execution System implementation
@@ -199,4 +195,4 @@ All of these work remotely with full state preservation and dependency resolutio
 - ✅ WebRTC manager foundation
 - ✅ Comprehensive testing framework
 
-**CURRENT STATUS: PHASE 3 COMPLETE - READY FOR PHASE 4 PLANNING** 🎉 
+**CURRENT STATUS: PHASE 3.5 COMPLETE - READY FOR PHASE 4 PLANNING** 🎉 
