@@ -56,11 +56,10 @@ class AudioTransform(Node):
             logger.warning(f"AudioTransform '{self.name}': audio data is not a numpy array.")
             return data
 
-        # Ensure audio_data is at least 2D
         if audio_data.ndim == 1:
-            audio_data = audio_data.reshape(1, -1)
-
-        input_channels = audio_data.shape[0]
+            is_mono = True
+        else:
+            is_mono = False
 
         # Resample if necessary
         if input_sample_rate != self.output_sample_rate:
@@ -71,24 +70,22 @@ class AudioTransform(Node):
             )
 
         # Mix channels if necessary
-        if input_channels != self.output_channels:
-            if self.output_channels == 1:
-                # Mix down to mono
-                audio_data = librosa.to_mono(y=audio_data)
-                audio_data = audio_data.reshape(1, -1)  # ensure it is 2d
-            elif input_channels == 1 and self.output_channels > 1:
-                # upmix mono to multi-channel by duplicating the channel
-                audio_data = np.tile(audio_data, (self.output_channels, 1))
-            else:
-                # For other cases (e.g., 5.1 to stereo), it's more complex.
-                # A simple approach is to take the first `output_channels`.
-                # This is a simplification.
-                logger.warning(
-                    f"AudioTransform '{self.name}': complex channel conversion from "
-                    f"{input_channels} to {self.output_channels} is simplified "
-                    "by taking the first channels."
-                )
-                audio_data = audio_data[: self.output_channels, :]
+        if not is_mono and self.output_channels == 1:
+            # Mix down to mono. This will return a 1D array.
+            audio_data = librosa.to_mono(y=audio_data)
+        elif is_mono and self.output_channels > 1:
+            # upmix mono to multi-channel by duplicating the channel
+            audio_data = np.tile(audio_data, (self.output_channels, 1))
+        elif not is_mono and audio_data.shape[0] != self.output_channels:
+            # For other cases (e.g., 5.1 to stereo), it's more complex.
+            # A simple approach is to take the first `output_channels`.
+            # This is a simplification.
+            logger.warning(
+                f"AudioTransform '{self.name}': complex channel conversion from "
+                f"{audio_data.shape[0]} to {self.output_channels} is simplified "
+                "by taking the first channels."
+            )
+            audio_data = audio_data[: self.output_channels, :]
 
         logger.debug(
             f"AudioTransform '{self.name}': processed audio to "
@@ -213,4 +210,22 @@ class AudioResampler(Node):
         return data
 
 
-__all__ = ["AudioTransform", "AudioBuffer", "AudioResampler"] 
+class ExtractAudioDataNode(Node):
+    """
+    A simple node that extracts the audio ndarray from a (data, rate) tuple.
+    """
+    def process(self, data: Any) -> Any:
+        """
+        Expects a tuple of (audio_data, sample_rate) and returns only audio_data.
+        """
+        if isinstance(data, tuple) and len(data) == 2 and isinstance(data[0], np.ndarray):
+            return data[0]
+        
+        logger.warning(
+            f"{self.__class__.__name__} '{self.name}': received data in "
+            "unexpected format. Expected a (ndarray, int) tuple."
+        )
+        return None
+
+
+__all__ = ["AudioTransform", "AudioBuffer", "AudioResampler", "ExtractAudioDataNode"] 

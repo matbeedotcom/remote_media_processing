@@ -14,6 +14,7 @@ from .text_processor import *  # noqa: F401, F403
 from .serialized_class_executor import *  # noqa: F401, F403
 from .source import * # noqa: F401, F403
 from .remote import * # noqa: F401, F403
+from .sink import * # noqa: F401, F403
 from remotemedia.core.node import Node
 from .audio import AudioTransform, AudioBuffer, AudioResampler
 from .text_processor import TextProcessorNode
@@ -22,7 +23,8 @@ from .video import VideoTransform, VideoBuffer, VideoResizer
 from .remote import RemoteExecutionNode, RemoteObjectExecutionNode
 from .serialized_class_executor import SerializedClassExecutorNode
 from .custom import StatefulCounter
-from .ml import WhisperTranscriptionNode, UltravoxNode
+from .ml import WhisperTranscriptionNode, UltravoxNode, TransformersPipelineNode
+# from .ml import WhisperTranscriptionNode, UltravoxNode
 
 # ML nodes will be added in later phases
 # from .ml import *  # noqa: F401, F403
@@ -38,6 +40,8 @@ __all__ = [
     "MediaReaderNode",
     "AudioTrackSource",
     "VideoTrackSource",
+    # Sink
+    "MediaWriterNode",
     # Text
     "TextProcessorNode",
     # Video
@@ -54,4 +58,5 @@ __all__ = [
     # ML
     "WhisperTranscriptionNode",
     "UltravoxNode",
+    "TransformersPipelineNode",
 ] 

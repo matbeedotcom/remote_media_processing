@@ -97,21 +97,32 @@ class MediaReaderNode(Node):
 
 class TrackSource(Node):
     """
-    Base class for track source nodes.
+    Base class for track source nodes that extract a specific track from a
+    stream of mixed-media dictionaries.
     """
+    # Subclasses should override these
+    _track_type: str = ""
+    _frame_type: type = Frame
 
     def process(self, data: Any) -> Any:
         """
-        Processes an av frame.
-        Expects `data` to be an `av.frame.Frame` (AudioFrame or VideoFrame).
+        Processes input data, expecting a dictionary like `{'audio': frame}`.
+        It extracts the frame for the specific track type and processes it.
         """
-        if not isinstance(data, Frame):
+        if not isinstance(data, dict) or self._track_type not in data:
+            # Not the data this track is looking for, ignore silently.
+            return None
+
+        frame = data[self._track_type]
+
+        if not isinstance(frame, self._frame_type):
             logger.warning(
-                f"{self.__class__.__name__} '{self.name}': received data in "
-                "unexpected format. Expected an av.frame.Frame."
+                f"{self.__class__.__name__} '{self.name}': received data for track "
+                f"'{self._track_type}' with unexpected frame type {type(frame)}."
             )
             return None
-        return self._process_frame(data)
+
+        return self._process_frame(frame)
 
     def _process_frame(self, frame: Frame) -> Any:
         raise NotImplementedError
@@ -121,6 +132,8 @@ class AudioTrackSource(TrackSource):
     """
     An audio track source node that converts `av.AudioFrame` objects into NumPy arrays.
     """
+    _track_type = "audio"
+    _frame_type = AudioFrame
 
     def _process_frame(self, frame: AudioFrame) -> Any:
         """
@@ -135,6 +148,12 @@ class AudioTrackSource(TrackSource):
         """
         try:
             audio_data = frame.to_ndarray()
+            # Normalize and convert to float32, as expected by librosa
+            if audio_data.dtype == np.int16:
+                audio_data = audio_data.astype(np.float32) / 32768.0
+            elif audio_data.dtype == np.int32:
+                audio_data = audio_data.astype(np.float32) / 2147483648.0
+            
             logger.debug(
                 f"AudioTrackSource '{self.name}': processed audio frame with "
                 f"{frame.samples} samples at {frame.sample_rate}Hz."
@@ -149,6 +168,8 @@ class VideoTrackSource(TrackSource):
     """
     A video track source node that converts `av.VideoFrame` objects into NumPy arrays.
     """
+    _track_type = "video"
+    _frame_type = VideoFrame
 
     def __init__(self, output_format: str = "bgr24", **kwargs):
         """

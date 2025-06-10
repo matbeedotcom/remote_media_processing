@@ -42,44 +42,43 @@ See `PHASE_3_PROJECT_TRACKING.md` for detailed status and `DevelopmentStrategyDo
 
 ### Local Processing Pipeline
 ```python
-from remotemedia import Pipeline
-from remotemedia.nodes import AudioTransform, VideoTransform
+from remotemedia.core import Pipeline
+from remotemedia.nodes import MediaReaderNode, AudioResampleNode, MediaWriterNode
 
 # Create a simple local processing pipeline
-pipeline = Pipeline()
-pipeline.add_node(AudioTransform(sample_rate=44100))
-pipeline.add_node(VideoTransform(resolution=(1920, 1080)))
-
-# Process data
-result = pipeline.process(input_data)
+pipeline = Pipeline(
+    MediaReaderNode(file_path="input.mp3"),
+    AudioResampleNode(target_sample_rate=16000),
+    MediaWriterNode(output_path="output.wav")
+)
+pipeline.run()
 ```
 
-### Remote Code Execution (Phase 3)
+### Remote Code Execution
+The SDK makes it simple to define a node locally and have it execute on a remote server. This is ideal for offloading heavy ML workloads.
+
 ```python
-from remotemedia.remote.client import RemoteExecutionClient
-from remotemedia.core.node import RemoteExecutorConfig
+# client_script.py
+from remotemedia.core import Pipeline
+from remotemedia.nodes import MediaReaderNode, MediaWriterNode, RemoteObjectExecutionNode
+from my_custom_nodes import AudioEchoEffect # A custom node defined in your project
 
-# Define a custom class
-class DataProcessor:
-    def __init__(self):
-        self.processed_count = 0
-    
-    def process(self, data):
-        self.processed_count += 1
-        return {"result": data * 2, "count": self.processed_count}
+# 1. Instantiate your custom node locally.
+#    This object will be serialized and sent to the server for execution.
+echo_effect = AudioEchoEffect(delay_seconds=0.5, decay_factor=0.6)
 
-# Execute remotely with CloudPickle
-config = RemoteExecutorConfig(host='localhost', port=50051)
-async with RemoteExecutionClient(config) as client:
-    result = await client.execute_node(
-        node_type="SerializedClassExecutorNode",
-        config={},
-        input_data={
-            "serialized_object": cloudpickle.dumps(DataProcessor()),
-            "method_name": "process",
-            "method_args": [42]
-        }
-    )
+# 2. Wrap it in a RemoteObjectExecutionNode
+remote_echo_node = RemoteObjectExecutionNode(node_object=echo_effect)
+
+# 3. Build the pipeline. The remote node fits in just like any other.
+pipeline = Pipeline(
+    MediaReaderNode(file_path="input.wav"),
+    remote_echo_node,
+    MediaWriterNode(output_path="output_with_echo.wav")
+)
+
+# When run, the pipeline will transparently execute the echo effect on the remote server.
+pipeline.run()
 ```
 
 ## Installation
@@ -152,6 +151,7 @@ scripts/                    # Development scripts
 
 ## Documentation
 
+- [**Developer Guide**](DEVELOPER_GUIDE.md) - **Start here!** Essential guide for building with the SDK.
 - [Development Strategy](DevelopmentStrategyDocument.md)
 - [Project Tracking](PROJECT_TRACKING.md)
 - [API Documentation](docs/) (Coming soon)

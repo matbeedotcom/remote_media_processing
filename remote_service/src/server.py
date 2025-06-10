@@ -221,10 +221,13 @@ class RemoteExecutionServicer(execution_pb2_grpc.RemoteExecutionServiceServicer)
                     if req.HasField("data"):
                         yield serializer.deserialize(req.data)
 
-            # Assumes obj.process is an async generator
-            async for result in obj.process(input_stream_generator()):
-                serialized_result = serializer.serialize(result)
-                yield execution_pb2.StreamObjectResponse(data=serialized_result)
+            # The server must iterate through the input stream and pass each item
+            # to the object's process method.
+            async for item in input_stream_generator():
+                # obj.process is an async generator that processes a single item
+                async for result in obj.process(item):
+                    serialized_result = serializer.serialize(result)
+                    yield execution_pb2.StreamObjectResponse(data=serialized_result)
 
         except Exception as e:
             self.logger.error(f"Error during StreamObject execution: {e}")
