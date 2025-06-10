@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """
-Example of using the RemoteExecutionNode to run the UltravoxNode
-on a remote server for multimodal audio-text to text generation.
+Example of using the RemoteObjectExecutionNode to stream and execute an
+UltravoxNode instance on a remote server.
 
-This demonstrates how to offload a heavy, conversational ML workload.
+This demonstrates how to define a node locally, then offload its execution
+to a remote machine without requiring the node to be pre-registered on the server.
+The server only needs the required dependencies (e.g. PyTorch, transformers).
 
 **TO RUN THIS EXAMPLE:**
 
@@ -34,7 +36,8 @@ from remotemedia.core.pipeline import Pipeline
 from remotemedia.core.node import RemoteExecutorConfig
 from remotemedia.nodes.source import MediaReaderNode
 from remotemedia.nodes.audio import AudioResampler
-from remotemedia.nodes.remote import RemoteExecutionNode
+from remotemedia.nodes.remote import RemoteObjectExecutionNode
+from remotemedia.nodes.ml import UltravoxNode
 from remotemedia.nodes.transform import PassThrough
 
 # Configure basic logging
@@ -82,22 +85,24 @@ async def main():
     # Configure the remote execution
     remote_config = RemoteExecutorConfig(host="127.0.0.1", port=50052, ssl_enabled=False)
     
-    # This node tells the server to run an 'UltravoxNode'.
-    # The audio stream is sent to the server, and the text response is sent back.
-    pipeline.add_node(RemoteExecutionNode(
-        node_to_execute="UltravoxNode",
-        remote_config=remote_config,
-        # We can pass config to the remote node.
-        # Here we define the persona of the AI assistant.
-        node_config={
-            "system_prompt": "You are a poetic assistant, skilled in explaining complex scientific concepts with creative flair."
-        }
+    # 1. Create an instance of the UltravoxNode locally.
+    #    We can configure its parameters just like any other local object.
+    ultravox_instance = UltravoxNode(
+        system_prompt="You are a poetic assistant, skilled in explaining complex scientific concepts with creative flair."
+    )
+
+    # 2. Use RemoteObjectExecutionNode to execute this object on the server.
+    #    The node object is serialized and sent to the server, which then streams
+    #    data to and from its `process` method.
+    pipeline.add_node(RemoteObjectExecutionNode(
+        object_to_execute=ultravox_instance,
+        remote_config=remote_config
     ))
 
     # Add a simple node to print the text response from the server
     pipeline.add_node(PrintNode())
 
-    logging.info("Starting remote Ultravox pipeline...")
+    logging.info("Starting remote Ultravox pipeline (via object streaming)...")
     async with pipeline.managed_execution():
         while pipeline.is_running():
             await asyncio.sleep(0.5)
