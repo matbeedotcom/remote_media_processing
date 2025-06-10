@@ -41,7 +41,7 @@ def remote_config():
 
 
 @pytest.mark.asyncio
-async def test_remote_object_streaming(remote_config):
+async def test_remote_object_streaming(remote_config, grpc_server):
     """
     Tests end-to-end remote streaming execution of a serialized object.
     """

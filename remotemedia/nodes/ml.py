@@ -362,7 +362,7 @@ class TransformersPipelineNode(Node):
 
         self.logger.info(f"Node '{self.name}' initialized successfully.")
 
-    async def process(self, data: Any) -> AsyncGenerator[Any, None]:
+    async def process(self, data: Any) -> Any:
         """
         Processes a single data item using the loaded pipeline.
 
@@ -371,7 +371,7 @@ class TransformersPipelineNode(Node):
         Args:
             data: The single input data item to be processed by the pipeline.
 
-        Yields:
+        Returns:
             The processing result.
         """
         if not self.pipe:
@@ -379,7 +379,7 @@ class TransformersPipelineNode(Node):
 
         # The pipeline call can be blocking, so run it in a thread
         result = await asyncio.to_thread(self.pipe, data)
-        yield result
+        return result
 
     async def cleanup(self):
         """Cleans up the pipeline and associated resources."""

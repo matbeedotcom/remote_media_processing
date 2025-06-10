@@ -47,7 +47,7 @@ async def test_audio_resampling_pipeline(input_rate, output_rate, buffer_size):
 
     # 3. Process the stream and collect output
     output_chunks = []
-    with pipeline.managed_execution():
+    async with pipeline.managed_execution():
         async for result in pipeline.process(audio_stream):
             # The result from the pipeline is the final processed data tuple
             output_chunks.append(result[0])

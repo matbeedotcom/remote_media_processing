@@ -44,12 +44,7 @@ async def test_transformers_pipeline_node_text_classification():
 
     # Process a sample text
     input_text = "This is a fantastic library!"
-    result_stream = node.process(input_text)
-
-    # Get the single result from the async generator
-    results = [res async for res in result_stream]
-    assert len(results) == 1
-    result = results[0]
+    result = await node.process(input_text)
 
     # Validate the output
     assert isinstance(result, list)
@@ -102,10 +97,8 @@ async def test_remote_transformers_pipeline_node(tmp_path):
         await remote_exec_node.initialize()
 
         # Process data through the remote node
-        async def input_stream():
-            yield "This is a fantastic library!"
-
-        result_stream = remote_exec_node.process(input_stream())
+        input_text = "This is a fantastic library!"
+        result_stream = remote_exec_node.process(input_text)
         results = [res async for res in result_stream]
 
         # Clean up the remote node

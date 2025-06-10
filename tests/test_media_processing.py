@@ -62,7 +62,7 @@ async def test_process_dummy_source(caplog):
     processed_audio = 0
     processed_video = 0
 
-    with pipeline.managed_execution():
+    async with pipeline.managed_execution():
         async for result in pipeline.process():
             if 'audio' in result:
                 processed_audio += 1

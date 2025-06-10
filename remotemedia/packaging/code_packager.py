@@ -74,6 +74,16 @@ class CodePackager:
         # Analyze dependencies
         dependencies = self.analyzer.analyze_object(obj)
         
+        # Also include the object's own source file
+        try:
+            import inspect
+            source_file = inspect.getfile(obj.__class__)
+            source_path = Path(source_file).resolve()
+            if self.analyzer._is_local_dependency(source_path):
+                dependencies.add(source_path)
+        except (TypeError, OSError):
+            logger.debug(f"Could not get source for object {obj}, it may be dynamically defined.")
+        
         # Add additional files if specified
         if additional_files:
             for file_path in additional_files:

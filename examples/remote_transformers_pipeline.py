@@ -38,8 +38,7 @@ from remotemedia.core.pipeline import Pipeline
 from remotemedia.core.node import RemoteExecutorConfig, Node
 from remotemedia.nodes.source import MediaReaderNode, AudioTrackSource
 from remotemedia.nodes.audio import AudioTransform, ExtractAudioDataNode
-from remotemedia.nodes.remote import RemoteObjectExecutionNode
-from remotemedia.nodes.ml import TransformersPipelineNode
+from remotemedia.nodes.remote import RemoteExecutionNode
 
 # Configure basic logging
 logging.basicConfig(
@@ -68,17 +67,16 @@ async def main():
         )
         return
 
-    # 1. Define the TransformersPipelineNode instance locally.
-    audio_classifier = TransformersPipelineNode(
-        task="audio-classification",
-        model="superb/wav2vec2-base-superb-ks",
-    )
-
-    # 2. Wrap the classifier instance in a RemoteObjectExecutionNode.
+    # 1. Configure the remote execution for a standard `TransformersPipelineNode`.
+    #    The server will instantiate this node with the provided configuration.
     remote_config = RemoteExecutorConfig(host="127.0.0.1", port=50052, ssl_enabled=False)
-    remote_classifier_node = RemoteObjectExecutionNode(
-        obj_to_execute=audio_classifier,
-        remote_config=remote_config
+    remote_classifier_node = RemoteExecutionNode(
+        node_to_execute="TransformersPipelineNode",
+        remote_config=remote_config,
+        node_config={
+            "task": "audio-classification",
+            "model": "superb/wav2vec2-base-superb-ks",
+        },
     )
 
     # 3. Build the pipeline. The first node is the source.

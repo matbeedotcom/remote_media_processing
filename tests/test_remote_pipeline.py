@@ -25,7 +25,7 @@ async def generate_audio_chunks(total_samples, sample_rate, chunk_sizes):
 @pytest.mark.parametrize("input_rate, output_rate, buffer_size", [
     (48000, 16000, 2048),
 ])
-async def test_remote_audio_resampling_pipeline(input_rate, output_rate, buffer_size):
+async def test_remote_audio_resampling_pipeline(grpc_server, input_rate, output_rate, buffer_size):
     """
     Test a pipeline with a remote node that resamples streaming audio data
     against a live, locally running server.

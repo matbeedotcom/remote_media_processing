@@ -36,7 +36,7 @@ setup(
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/remotemedia/remotemedia-sdk",
-    packages=find_packages(exclude=["tests*", "examples*", "docs*"]),
+    packages=find_packages(include=['remotemedia*', 'remote_service*']),
     classifiers=[
         "Development Status :: 3 - Alpha",
         "Intended Audience :: Developers",
@@ -51,7 +51,14 @@ setup(
         "Programming Language :: Python :: 3.12",
     ],
     python_requires=">=3.9",
-    install_requires=read_requirements("requirements.txt"),
+    install_requires=[
+        "grpcio",
+        "grpcio-tools",
+        "protobuf",
+        "numpy",
+        "av",
+        "cloudpickle"
+    ],
     extras_require={
         "dev": read_requirements("requirements-dev.txt"),
         "ml": read_requirements("requirements-ml.txt"),
