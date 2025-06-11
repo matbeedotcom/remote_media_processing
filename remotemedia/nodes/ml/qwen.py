@@ -118,7 +118,7 @@ class Qwen2_5OmniNode(Node):
             print(f"Qwen2_5OmniNode.initialize: Model moved to device {self.device}")
 
             logger.info("Qwen2.5-Omni model initialized successfully.")
-            self.is_initialized = True
+            self._is_initialized = True
         except Exception as e:
             raise NodeError(f"Failed to initialize Qwen2.5-Omni model: {e}")
 
