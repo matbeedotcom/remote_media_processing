@@ -86,7 +86,7 @@ async def main():
     
     # The source node reads the video and produces a stream of AV packets
     pipeline.add_node(MediaReaderNode(
-        path="https://qianwen-res.oss-cn-beijing.aliyuncs.com/Qwen2.5-Omni/draw.mp4"
+        path="examples/BigBuckBunny_320x180.mp4"
     ))
     
     # Add track sources to handle the mixed-media stream
