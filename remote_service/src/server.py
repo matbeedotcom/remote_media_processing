@@ -315,7 +315,9 @@ class RemoteExecutionServicer(execution_pb2_grpc.RemoteExecutionServiceServicer)
                  yield execution_pb2.StreamObjectResponse(error="Serialized object must have initialize, process, and cleanup methods.")
                  return
 
-            await obj.initialize()
+            # Initialization is now handled lazily by the node's process method
+            # to avoid race conditions with the client stream.
+            # await obj.initialize()
 
             serialization_format = init_request.serialization_format
             if serialization_format == 'pickle':

@@ -32,7 +32,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from remotemedia.core.node import RemoteExecutorConfig
 from remotemedia.core.pipeline import Pipeline
-from remotemedia.nodes.source import MediaReaderNode
+from remotemedia.nodes.source import MediaReaderNode, AudioTrackSource, VideoTrackSource
 from remotemedia.nodes.ml import Qwen2_5OmniNode
 from remotemedia.nodes.remote import RemoteObjectExecutionNode
 
@@ -86,9 +86,13 @@ async def main():
     
     # The source node reads the video and produces a stream of AV packets
     pipeline.add_node(MediaReaderNode(
-        path="examples/BigBuckBunny_320x180.mp4"
+        path="https://qianwen-res.oss-cn-beijing.aliyuncs.com/Qwen2.5-Omni/draw.mp4"
     ))
     
+    # Add track sources to handle the mixed-media stream
+    pipeline.add_node(AudioTrackSource())
+    pipeline.add_node(VideoTrackSource())
+
     # The RemoteObjectExecutionNode sends the local_qwen_instance to the server
     # and streams the data from the previous node to it.
     pipeline.add_node(RemoteObjectExecutionNode(

@@ -164,42 +164,14 @@ class Qwen2_5OmniNode(Node):
             return await asyncio.to_thread(_inference_thread)
 
     async def process(self, data_stream: AsyncGenerator[Any, None]) -> AsyncGenerator[Any, None]:
-        # Lazy initialization: ensure the model is loaded before processing.
-        if not self.is_initialized:
-            await self.initialize()
+        async for data, timestamp in data_stream:
+            if isinstance(data, np.ndarray) and data.ndim == 3:  # Video frame
+                self.video_buffer.append(data)
+                self.logger.debug(f"Buffered video frame with pts {timestamp}")
 
-        frame_count = 0
-        log_interval = 50  # Log buffer status every 50 video frames
-
-        async for item in data_stream:
-            # This node expects dictionaries from MediaReaderNode
-            if not isinstance(item, dict):
-                self.logger.warning(f"Qwen node received non-dict item, skipping. Got {type(item)}")
-                continue
-
-            if 'video' in item and isinstance(item['video'], av.VideoFrame):
-                frame = item['video']
-                self.video_buffer.append(frame.to_ndarray(format='rgb24'))
-                self.logger.debug(f"Buffered video frame with pts {frame.pts}")
-                
-                frame_count += 1
-                if frame_count % log_interval == 0:
-                    self.logger.info(
-                        f"Processed {frame_count} frames. "
-                        f"Current buffer: {len(self.video_buffer)} video frames, "
-                        f"{len(self.audio_buffer)} audio chunks."
-                    )
-
-            elif 'audio' in item and isinstance(item['audio'], av.AudioFrame):
-                frame = item['audio']
-                # Resample audio to the rate expected by the model
-                resampled_chunk = librosa.resample(
-                    frame.to_ndarray().astype(np.float32).mean(axis=0),
-                    orig_sr=frame.sample_rate,
-                    target_sr=self.audio_sample_rate
-                )
-                self.audio_buffer.append(resampled_chunk)
-                self.logger.debug(f"Buffered audio frame with pts {frame.pts}")
+            elif isinstance(data, np.ndarray) and data.ndim <= 2:  # Audio frame
+                self.audio_buffer.append(data)
+                self.logger.debug(f"Buffered audio chunk with pts {timestamp}")
 
             # Check if video buffer is full enough to trigger processing
             if len(self.video_buffer) >= self.video_buffer_max_frames:
