@@ -21,6 +21,7 @@ import uuid
 import json
 import pickle
 import shutil
+import multiprocessing
 
 import grpc
 from grpc_health.v1 import health_pb2_grpc
@@ -627,6 +628,12 @@ async def serve():
 
 if __name__ == '__main__':
     try:
+        # Set the multiprocessing start method to 'spawn' for CUDA compatibility,
+        # as required by libraries like PyTorch and vLLM when using GPUs.
+        # This must be done at the entry point of the application before any
+        # CUDA-related code is initialized.
+        if sys.platform != "win32":
+            multiprocessing.set_start_method('spawn', force=True)
         asyncio.run(serve())
     except KeyboardInterrupt:
         print("Server interrupted")
