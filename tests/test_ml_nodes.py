@@ -106,7 +106,14 @@ async def test_remote_transformers_pipeline_node(tmp_path):
 
         # Assertions
         assert len(results) == 1
-        result = results[0]
+        result_data = results[0]
+
+        # The remote node returns a dictionary with the result and session_id
+        assert isinstance(result_data, dict)
+        assert "result" in result_data
+        assert "session_id" in result_data
+
+        result = result_data["result"]
         assert isinstance(result, list)
         assert "score" in result[0]
         assert result[0]['label'] == 'POSITIVE'
