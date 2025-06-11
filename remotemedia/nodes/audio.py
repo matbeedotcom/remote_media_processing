@@ -232,4 +232,52 @@ class ExtractAudioDataNode(Node):
         return None
 
 
-__all__ = ["AudioTransform", "AudioBuffer", "AudioResampler", "ExtractAudioDataNode"] 
+class ConcatenateAudioNode(Node):
+    """
+    A streaming-aware node that consumes an entire audio stream, concatenates
+    all chunks, and yields a single (audio_data, sample_rate) tuple at the end.
+    The output audio is flattened to a 1D array (mono).
+    """
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.is_streaming = True
+        self._buffer = []
+        self._sample_rate = None
+
+    async def process(self, data_stream: Any) -> Any:
+        """
+        Consumes the data_stream and yields a single concatenated result.
+        """
+        async for data in data_stream:
+            if not isinstance(data, tuple) or len(data) != 2:
+                logger.warning(f"ConcatenateAudioNode received non-tuple data: {type(data)}. Skipping.")
+                continue
+            
+            audio_chunk, sample_rate = data
+
+            if not isinstance(audio_chunk, np.ndarray):
+                logger.warning(f"ConcatenateAudioNode received non-numpy data: {type(audio_chunk)}. Skipping.")
+                continue
+
+            if self._sample_rate is None:
+                self._sample_rate = sample_rate
+            elif self._sample_rate != sample_rate:
+                logger.error("Sample rate changed mid-stream. This is not supported by ConcatenateAudioNode.")
+                return
+
+            self._buffer.append(audio_chunk)
+        
+        # After the stream is exhausted, concatenate and yield.
+        if self._buffer:
+            # If chunks are 2D (channels, samples), concatenate along samples axis
+            axis = 1 if self._buffer[0].ndim > 1 else 0
+            full_audio = np.concatenate(self._buffer, axis=axis)
+
+            # Flatten to a 1D array (mono) as expected by many models
+            final_audio = full_audio.flatten()
+            
+            logger.info(f"Concatenated audio to a single clip of {final_audio.shape[0] / self._sample_rate:.2f}s.")
+            yield (final_audio, self._sample_rate)
+
+
+__all__ = ["AudioTransform", "AudioBuffer", "AudioResampler", "ExtractAudioDataNode", "ConcatenateAudioNode"] 

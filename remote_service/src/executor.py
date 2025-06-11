@@ -14,7 +14,7 @@ from dataclasses import dataclass
 # Import SDK components
 try:
     from remotemedia.nodes import (
-        PassThroughNode, BufferNode,
+        PassThroughNode, BatchingNode,
         AudioTransform, AudioBuffer, AudioResampler,
         VideoTransform, VideoBuffer, VideoResizer,
         TransformNode, FormatConverter,
@@ -29,7 +29,7 @@ except ImportError:
     logging.warning("RemoteMedia SDK not available, using mock implementations")
     SDK_AVAILABLE = False
     Node = object
-    PassThroughNode = BufferNode = None
+    PassThroughNode = BatchingNode = None
     AudioTransform = AudioBuffer = AudioResampler = None
     VideoTransform = VideoBuffer = VideoResizer = None
     TransformNode = FormatConverter = None
@@ -85,8 +85,8 @@ class TaskExecutor:
             # Base nodes
             if PassThroughNode:
                 registry['PassThroughNode'] = PassThroughNode
-            if BufferNode:
-                registry['BufferNode'] = BufferNode
+            if BatchingNode:
+                registry['BatchingNode'] = BatchingNode
             
             # Audio nodes
             if AudioTransform:
