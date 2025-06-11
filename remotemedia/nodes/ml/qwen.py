@@ -163,7 +163,7 @@ class Qwen2_5OmniNode(Node):
             return await asyncio.to_thread(_inference_thread)
 
     async def process(self, data_stream: AsyncGenerator[Any, None]) -> AsyncGenerator[Any, None]:
-        async for data, _ in data_stream:
+        async for data in data_stream:
             if isinstance(data, av.VideoFrame):
                 self.video_buffer.append(data.to_ndarray(format='rgb24'))
             elif isinstance(data, av.AudioFrame):
