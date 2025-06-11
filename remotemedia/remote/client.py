@@ -252,19 +252,18 @@ class RemoteExecutionClient:
             raise ConnectionError("Client not connected.")
 
         async def request_generator():
-            is_first = True
+            # First, send the initialization message with session info.
+            # This must be sent immediately to establish the stream with the server,
+            # even if the input data stream is slow to produce its first item.
+            yield execution_pb2.ExecuteObjectStreamRequest(
+                session_id=session_id,
+                config_json=json.dumps(config or {})
+            )
+
+            # Then, stream the data chunks as they arrive.
             async for data_chunk in input_stream:
-                if is_first:
-                    # The first message contains session info and config
-                    request = execution_pb2.ExecuteObjectStreamRequest(
-                        session_id=session_id,
-                        config_json=json.dumps(config or {})
-                    )
-                    is_first = False
-                else:
-                    # Subsequent messages contain just the data
-                    chunk = execution_pb2.Chunk(content=pickle.dumps(data_chunk))
-                    request = execution_pb2.ExecuteObjectStreamRequest(chunk=chunk)
+                chunk = execution_pb2.Chunk(content=pickle.dumps(data_chunk))
+                request = execution_pb2.ExecuteObjectStreamRequest(chunk=chunk)
                 yield request
 
         logger.debug(f"Streaming to remote object with session_id: {session_id}")

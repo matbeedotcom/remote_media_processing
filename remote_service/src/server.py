@@ -271,6 +271,7 @@ class RemoteExecutionServicer(execution_pb2_grpc.RemoteExecutionServiceServicer)
         try:
             # The first message contains the session_id and config
             init_request = await request_iterator.__anext__()
+            print(f"remote_service.StreamObject: init_request: {init_request}")
             session_id = init_request.session_id
             config = json.loads(init_request.config_json)
 
