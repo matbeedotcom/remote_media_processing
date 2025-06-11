@@ -169,6 +169,7 @@ class UltravoxNode(Node):
                  system_prompt: str = "You are a friendly and helpful AI assistant.",
                  **kwargs: Any) -> None:
         super().__init__(**kwargs)
+        self.is_streaming = True
         self.model_id = model_id
         self._requested_device = device
         self._requested_torch_dtype = torch_dtype
@@ -236,15 +237,22 @@ class UltravoxNode(Node):
                 {'audio': audio_data, 'turns': turns, 'sampling_rate': self.sample_rate},
                 max_new_tokens=self.max_new_tokens
             )
-            # The pipeline returns the full conversation history. We want the last message from the assistant.
-            last_turn = result[0]['generated_text'][-1]
-            if last_turn['role'] == 'assistant':
-                response = last_turn['content'].strip()
-                logger.info(f"Ultravox generated response: '{response}'")
-                return response
-            else:
-                logger.warning("Model did not return an assistant message as the last turn.")
+            logger.info(f"Ultravox result: {result}")
+            # The pipeline's output for this model is a list containing a single dictionary,
+            # where 'generated_text' holds the final response string.
+            if not (isinstance(result, list) and result and
+                    isinstance(result[0], dict) and 'generated_text' in result[0]):
+                logger.warning(f"Model did not return an expected response format. Full result: {result}")
                 return None
+
+            response = result[0]['generated_text']
+            if not isinstance(response, str):
+                logger.warning(f"Expected 'generated_text' to be a string, but got {type(response)}. Full result: {result}")
+                return None
+
+            response = response.strip()
+            logger.info(f"Ultravox generated response: '{response}'")
+            return response
         except Exception as e:
             logger.error(f"Error during Ultravox inference: {e}", exc_info=True)
             return None

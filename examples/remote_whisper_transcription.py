@@ -40,6 +40,8 @@ from remotemedia.nodes.ml import WhisperTranscriptionNode
 # Configure basic logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
+REMOTE_HOST = os.environ.get("REMOTE_HOST", "127.0.0.1")
+remote_config = RemoteExecutorConfig(host=REMOTE_HOST, port=50052, ssl_enabled=False)
 
 class PrintNode(PassThroughNode):
     """A simple node that prints any data it receives."""
@@ -65,8 +67,6 @@ async def main():
     """
     Main function to run the remote Whisper transcription example.
     """
-    import os
-    REMOTE_HOST = os.environ.get("REMOTE_HOST", "127.0.0.1")
     # This example demonstrates sending a locally-defined `WhisperTranscriptionNode`
     # instance to a remote server for execution. This is useful for offloading
     # heavy ML tasks to a machine with more resources (e.g., a GPU).
@@ -74,7 +74,6 @@ async def main():
     # This example uses a pre-existing audio file.
     # 1. Create a dummy audio file for the example
     dummy_audio_path = "examples/transcribe_demo.wav"
-    # await create_dummy_audio_file(dummy_audio_path)
 
     # 2. Create and configure the pipeline
     pipeline = Pipeline()
@@ -88,16 +87,12 @@ async def main():
     # Whisper expects 16kHz mono audio, so we resample it locally.
     pipeline.add_node(AudioTransform(output_sample_rate=16000, output_channels=1))
 
-    # 2. Configure the remote execution node.
-    #    This node takes the `transcription_node` object, sends it to the server,
-    #    and manages the remote execution.
-    #    NOTE: The remote server must be running on the specified host and port.
-    remote_config = RemoteExecutorConfig(host=REMOTE_HOST, port=50052, ssl_enabled=False)
     transcription_node = WhisperTranscriptionNode()
-    remote_exec_node = RemoteObjectExecutionNode(
-        obj_to_execute=transcription_node,
-        remote_config=remote_config
-    )
+
+    # 2. Configure the remote execution.
+    #    We create a config object and then use it as a factory
+    #    to wrap our local `transcription_node` in a remote executor.
+    remote_exec_node = remote_config(transcription_node)
     pipeline.add_node(remote_exec_node)
 
     # Add a simple node to print the transcribed text received from the server
