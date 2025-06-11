@@ -212,9 +212,6 @@ class Qwen2_5OmniNode(Node):
                     self.model.generate(**inputs, streamer=streamer, **generate_kwargs)
                 except Exception as e:
                     self.logger.error(f"Error in generation thread: {e}", exc_info=True)
-                finally:
-                    # The streamer's `end` method will signal completion.
-                    pass
 
             thread = Thread(target=generation_thread)
             thread.start()
