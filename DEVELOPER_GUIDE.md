@@ -73,71 +73,117 @@ class MyHeavyMLNode(Node):
         pass
 ```
 
-## 3. Execution Models
+## 3. Remote Execution Models
 
-### Local Execution
+The SDK's most powerful feature is its ability to offload intensive work to a more powerful server. There are two primary ways to achieve this.
 
-This is the simplest model. The entire pipeline runs in a single process on your local machine. It's perfect for development, testing, and tasks that aren't computationally intensive.
+### A. `RemoteObjectExecutionNode`: For Custom, Streamed Objects
 
-### Remote Execution (Two Flavors)
+This is the most flexible and powerful pattern. You create a node *instance* on your client machine, and the SDK serializes the object, sends it to the server (along with its code dependencies), and executes it there.
 
-This is the SDK's most powerful feature, allowing you to offload intensive work to a more powerful server.
+-   **Pros:** Ultimate flexibility. Allows you to run arbitrary, custom code on the remote server without needing to modify the server's codebase. Perfect for experimentation and custom user logic.
+-   **Cons:** Incurs a slight overhead for serialization and code packaging.
 
-#### A. `RemoteExecutionNode`: For Pre-Registered Nodes
+This is where the Golden Rule from Section 2 is **essential**. The `__init__` runs on your client, but `initialize` and `process` run on the server.
 
-Use this when the node's class (e.g., `WhisperTranscriptionNode`) is already known and present in the `remotemedia.nodes` package on the server. You tell the server the *name* of the node to use.
+### B. `RemoteExecutionNode`: For Pre-Registered Nodes
+
+Use this when the node's class (e.g., `WhisperTranscriptionNode`) is already known and present in the `remotemedia.nodes` package on the server. You simply tell the server the *name* of the node to use.
 
 -   **Pros:** Efficient, simple to call.
 -   **Cons:** Requires the node to be part of the core SDK and deployed on the server.
 
-```python
-# client_script.py
-from remotemedia.nodes import RemoteExecutionNode
+### The `RemoteExecutorConfig` Smart Factory
 
-# The server will look for a registered node named "WhisperTranscriptionNode"
-# and instantiate it with these parameters.
-remote_whisper = RemoteExecutionNode(
-    node_type="WhisperTranscriptionNode",
-    node_config={
-        "model_id": "openai/whisper-large-v3-turbo",
-        "device": "cuda"
-    }
+While you can use the nodes above directly, the recommended approach is to use the `RemoteExecutorConfig` class. It acts as a "smart factory" that automatically chooses the correct remote execution node based on what you provide it.
+
+```python
+from remotemedia.core import RemoteExecutorConfig
+
+# Define the connection to your remote server
+remote_config = RemoteExecutorConfig(
+    host="192.168.1.100", 
+    port=50052, 
+    ssl_enabled=False
 )
+
+# --- Use Case 1: Run a pre-registered node by its name (uses RemoteExecutionNode) ---
+remote_whisper = remote_config(
+    "WhisperTranscriptionNode",
+    node_config={"model": "large-v3"}
+)
+
+# --- Use Case 2: Run a local object remotely (uses RemoteObjectExecutionNode) ---
+my_custom_node = MyCustomFilterNode(strength=0.8)
+remote_custom = remote_config(my_custom_node)
+
+# --- Build the pipeline ---
+pipeline = Pipeline(
+    MediaReaderNode(file_path="input.wav"),
+    remote_custom,  # The remote node fits in just like any other
+    MediaWriterNode(output_path="output.wav")
+)
+pipeline.run()
 ```
 
-#### B. `RemoteObjectExecutionNode`: For Custom, Streamed Objects
+## 4. Built-in ML Nodes
 
-This is the most flexible and powerful pattern. You create a node *instance* on your client machine, and the SDK serializes the object, sends it to the server, and executes it there.
+The SDK includes several pre-built nodes that integrate with popular machine learning libraries.
 
--   **Pros:** Ultimate flexibility. Allows you to run arbitrary, custom code on the remote server without needing to modify the server's codebase. Perfect for experimentation and custom user logic.
--   **Cons:** Incurs a slight overhead for serialization.
+### `TransformersPipelineNode` & `UltravoxNode`
 
-This is where the Golden Rule from Section 2 is **essential**. The `__init__` runs on your client, but `initialize` and `process` run on the server.
+These nodes provide access to the Hugging Face `transformers` library. `TransformersPipelineNode` is a generic wrapper for dozens of tasks like `audio-classification`, `text-generation`, and `image-to-text`, while `UltravoxNode` is specialized for the Ultravox multimodal model. They are excellent examples of the `RemoteObjectExecutionNode` pattern, where a locally defined object is executed on a remote server.
 
-**Example: Running a custom `UltravoxNode` remotely via object streaming.**
+**Example: Remote Audio Classification**
+
+This example shows how to define a `TransformersPipelineNode` on the client to perform audio classification on a remote server. The server will download the model (`superb/wav2vec2-base-superb-ks`) on the first run.
+
+```python
+# client_script.py
+from remotemedia.nodes.ml import TransformersPipelineNode
+
+# 1. Define the TransformersPipelineNode instance locally.
+#    This object itself will be serialized and sent to the server.
+classifier_node = TransformersPipelineNode(
+    task="audio-classification",
+    model="superb/wav2vec2-base-superb-ks",
+)
+
+# 2. Use the remote_config factory to wrap it.
+remote_classifier = remote_config(classifier_node)
+
+# 3. Build the audio processing pipeline.
+pipeline = Pipeline(
+    [
+        MediaReaderNode(path="sample_audio.wav"),
+        AudioTrackSource(),
+        # Resample to 16kHz mono audio for the classification model
+        AudioTransform(output_sample_rate=16000, output_channels=1),
+        ExtractAudioDataNode(),
+        remote_classifier,
+        PrintOutputNode(), # A custom node to print the results
+    ]
+)
+pipeline.run()
+```
+
+**Example: Running a custom `UltravoxNode` remotely.**
 
 ```python
 # examples/remote_ultravox.py
-
-# 1. Import the node class itself, not just the remote executor
 from remotemedia.nodes.ml import UltravoxNode
-from remotemedia.nodes.remote import RemoteObjectExecutionNode
 
-# 2. Instantiate the node locally. The __init__ method runs here.
-#    Note that no heavy libraries are imported or used at this stage.
+# 1. Instantiate the node locally. The __init__ method runs here.
 local_ultravox_object = UltravoxNode(
-    system_prompt="You are a helpful assistant.",
-    buffer_duration_s=5,
+    model_id="fixie-ai/ultravox-v0_5-llama-3_1-8b",
+    system_prompt="You are a helpful poetic assistant."
 )
 
-# 3. Wrap the local object in a RemoteObjectExecutionNode.
+# 2. Use the remote_config factory to wrap the local object.
 #    The SDK will serialize `local_ultravox_object` and send it to the server.
-#    The server will then call .initialize(), .process(), and .cleanup() on the deserialized object.
-remote_node = RemoteObjectExecutionNode(
-    node_object=local_ultravox_object
-)
+remote_node = remote_config(local_ultravox_object)
 
-# 4. Use the remote_node in a pipeline
+# 3. Use the remote_node in a pipeline
 pipeline = Pipeline(
     MediaReaderNode(file_path="gettysburg.wav"),
     remote_node,
@@ -146,54 +192,105 @@ pipeline = Pipeline(
 pipeline.run()
 ```
 
-## 4. Built-in ML Nodes
+### `VLLMNode`: Your Gateway to High-Performance LLMs
 
-The SDK includes several pre-built nodes that integrate with popular machine learning models and libraries, making it easy to add powerful AI capabilities to your pipelines. These nodes follow the "remote-first" design principle, ensuring that heavy dependencies and model loading are handled on the execution server, not on the client.
+For maximum performance, the `VLLMNode` provides direct access to the `vLLM` inference engine, allowing for high-throughput, streaming generation from a wide variety of open-source models. Its constructor is designed to mirror `vllm.LLM` for a familiar experience.
 
-### `TransformersPipelineNode`: Your Gateway to Hugging Face
+#### Key Features:
+- **Streaming-first**: Natively streams tokens as they are generated.
+- **Multimodal**: Supports text, image, and audio inputs.
+- **Familiar API**: Arguments like `model`, `tensor_parallel_size`, `quantization`, and `max_model_len` are exposed directly.
+- **Flexible Prompting**: Supports both simple f-string-style prompts and complex, model-specific chat templates.
 
-The `TransformersPipelineNode` is a versatile node that allows you to use almost any model from the Hugging Face Hub by simply specifying a `task`. It wraps the `transformers.pipeline` factory, giving you access to dozens of pre-trained models for audio, vision, and NLP.
-
-**Example: Remote Text Classification**
-
-Here's how you could use this node to perform sentiment analysis on a remote server. This example uses the `RemoteObjectExecutionNode` to send a locally-defined `TransformersPipelineNode` instance to the server for execution.
+#### Example 1: Simple Prompt Formatting
 
 ```python
-# client_script.py
-from remotemedia.core import Pipeline
-from remotemedia.nodes import RemoteObjectExecutionNode, TransformersPipelineNode
-
-# 1. Define the TransformersPipelineNode locally.
-#    The __init__ method runs on the client and is very lightweight.
-#    No models are downloaded here.
-sentiment_analyzer_object = TransformersPipelineNode(
-    task="text-classification",
-    model="distilbert-base-uncased-finetuned-sst-2-english"
+# Create a VLLMNode for a vision model
+deepseek_vllm_node = VLLMNode(
+    model="deepseek-ai/deepseek-vl2-tiny",
+    prompt_template="<|User|>: <image>\\n{question}\\n\\n<|Assistant|>:",
+    modalities=["image"],
+    max_model_len=4096,
+    hf_overrides={"architectures": ["DeepseekVLV2ForCausalLM"]},
+    sampling_params={"temperature": 0.2, "max_tokens": 128},
 )
-
-# 2. Wrap it in a RemoteObjectExecutionNode to send it to the server.
-remote_sentiment_node = RemoteObjectExecutionNode(
-    node_object=sentiment_analyzer_object
-)
-
-# 3. Create a simple pipeline to process some text.
-#    (In a real application, the data might come from a MediaReaderNode,
-#    a database, or another source).
-pipeline = Pipeline()
-# ... add a source node that yields text strings ...
-pipeline.add_node(remote_sentiment_node)
-# ... add a sink node to handle the results ...
-
-# When the pipeline runs, the server will receive sentiment_analyzer_object,
-# call its .initialize() method (which downloads the model and starts the
-# transformers pipeline), and then feed data to its .process() method.
-pipeline.run()
-
 ```
 
-This pattern allows you to experiment with different models and tasks on the fly, without ever needing to modify the server's code.
+#### Example 2: Using Model-Specific Chat Templates
 
-## 5. Server Setup
+For models requiring a complex conversation structure, set `use_chat_template=True`. The node will then expect a `messages` list in the data it receives.
+
+```python
+# Create a VLLMNode that uses the model's chat template
+internvl_vllm_node = VLLMNode(
+    model="OpenGVLab/InternVL2-2B",
+    use_chat_template=True,
+    modalities=["image"],
+    sampling_params={
+        "temperature": 0.2,
+        "max_tokens": 128,
+        "stop_tokens": ["<|endoftext|>", "<|im_start|>"] # Automatically converted to token IDs
+    },
+)
+
+# A TransformNode prepares the data for the chat template
+transform_for_chat = TransformNode(
+    transform_func=lambda image: {
+        "messages": [{'role': 'user', 'content': f'<image>\n{question}'}],
+        "image": image,
+    }
+)
+```
+
+## 5. Utility Nodes
+
+The SDK provides a set of small, reusable utility nodes that are essential for building complex and robust pipelines.
+
+| Node                   | Description                                                                                             |
+|------------------------|---------------------------------------------------------------------------------------------------------|
+| `TransformNode`        | Applies a custom function (sync or async) to each item in the stream. Perfect for simple data shaping.    |
+| `TakeFirstFrameNode`   | A specialized node that passes only the first video frame from a stream and ignores the rest.             |
+| `DecodeVideoFrame`     | Decodes a raw `av.VideoFrame` object into a `PIL.Image` for use in vision models.                         |
+| `ConcatenateAudioNode` | Consumes an entire audio stream and outputs a single, flattened audio array. Ideal for non-streaming models. |
+| `BatchingNode`         | Collects items into a list of a specified size (`batch_size`) before passing the batch downstream.      |
+| `PassThroughNode`      | Passes data through without modification. Useful for debugging.                                         |
+
+### Example: Building a Vision Pipeline
+
+This pipeline demonstrates how to chain several utility nodes together to feed a single video frame to a remote `VLLMNode`.
+
+```python
+from remotemedia.nodes.source import MediaReaderNode, VideoTrackSource
+from remotemedia.nodes.video import DecodeVideoFrame, TakeFirstFrameNode
+from remotemedia.nodes.transform import TransformNode
+from remotemedia.nodes.ml import VLLMNode
+
+# Assume remote_config and internvl_vllm_node are defined as above
+question = "What is happening in this image?"
+
+transform_for_chat = TransformNode(
+    transform_func=lambda image: {
+        "messages": [{'role': 'user', 'content': f'<image>\n{question}'}],
+        "image": image,
+    }
+)
+
+pipeline = Pipeline(
+    [
+        MediaReaderNode(path="input_video.mp4"),
+        VideoTrackSource(),       # Extracts raw video frames
+        TakeFirstFrameNode(),     # Takes only the first frame
+        DecodeVideoFrame(),       # Decodes the frame to an image
+        transform_for_chat,       # Formats the data for the model
+        remote_config(internvl_vllm_node), # Runs the model remotely
+        PrintResponseStream(),    # A custom node to print the output
+    ]
+)
+
+pipeline.run()
+```
+
+## 6. Server Setup
 
 To use remote execution, you need the gRPC server running.
 
@@ -201,6 +298,7 @@ To use remote execution, you need the gRPC server running.
     ```bash
     pip install -r requirements.txt
     pip install -r requirements-ml.txt
+    pip install vllm transformers
     ```
 
 2.  **Run the server:** You must run the server from the project's root directory with the `PYTHONPATH` set, so it can find all the necessary modules.
@@ -208,4 +306,4 @@ To use remote execution, you need the gRPC server running.
     PYTHONPATH=. python remote_service/src/server.py
     ```
 
-The server will then listen for incoming gRPC requests from clients running a `RemoteExecutionNode` or `RemoteObjectExecutionNode`. 
+The server will then listen for incoming gRPC requests from clients running a remote node. 
