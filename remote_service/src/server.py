@@ -289,39 +289,21 @@ class RemoteExecutionServicer(execution_pb2_grpc.RemoteExecutionServiceServicer)
             await obj.initialize()
             self.logger.info("Remote object initialized successfully.")
 
-            # 3. Create a queue to decouple the network stream from the node's processing.
-            queue = asyncio.Queue()
-
-            # 4. Create a task to read from the network and put items into the queue.
-            async def reader_task():
-                self.logger.info("Reader task started.")
-                try:
-                    async for req in request_iterator:
-                        if req.HasField("data"):
-                            queue.put_nowait(pickle.loads(req.data))
-                    await queue.put(None)  # Signal the end of the stream
-                except Exception as e:
-                    self.logger.error(f"Error in reader task: {e}", exc_info=True)
-                    await queue.put(None) # Ensure processor doesn't hang
-                finally:
-                    self.logger.info("Reader task finished.")
-
-            reader = asyncio.create_task(reader_task())
-
-            # 5. Create the input stream for the node, which reads from the queue.
+            # Create an input stream for the node's process method directly from the request iterator
             async def processor_input_stream():
-                while True:
-                    item = await queue.get()
-                    if item is None:
-                        break
-                    yield item
+                self.logger.info("Processor input stream started.")
+                count = 0
+                async for req in request_iterator:
+                    count += 1
+                    self.logger.debug(f"Server received data chunk {count}")
+                    if req.HasField("data"):
+                        yield pickle.loads(req.data)
+                self.logger.info(f"Processor input stream finished after {count} chunks.")
 
-            # 6. Process the stream from the queue.
+            # Process the stream
             async for result in obj.process(processor_input_stream()):
                 serialized_result = pickle.dumps(result)
                 yield execution_pb2.StreamObjectResponse(data=serialized_result)
-            
-            await reader # Ensure the reader task is complete
 
         except Exception as e:
             self.logger.error(f"Error during StreamObject execution: {e}", exc_info=True)
