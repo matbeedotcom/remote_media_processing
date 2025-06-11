@@ -105,33 +105,18 @@ class RemoteObjectExecutionNode(Node):
 
     async def initialize(self):
         """
-        Initializes the remote object by sending it to the server, having it
-        initialized there, and establishing a session.
+        Initializes the remote execution client and connects. The actual
+        object initialization will happen on the server within the stream.
         """
         await super().initialize()
         
-        # Pass channel options to allow for large messages.
         channel_options = [
             ('grpc.max_send_message_length', -1),
             ('grpc.max_receive_message_length', -1),
         ]
         self.client = RemoteExecutionClient(self.remote_config, channel_options=channel_options)
         await self.client.connect()
-
-        logger.info(f"Initializing remote object for node '{self.name}'...")
-        # The server is expected to automatically call 'initialize' on any new
-        # object it receives. Explicitly calling 'initialize' again here causes
-        # a double initialization. We now call a cheap, harmless method like
-        # '__str__' to establish the session while relying on the server's
-        # implicit, single initialization.
-        response = await self.client.execute_object_method(
-            obj=self.obj_to_execute,
-            method_name='__str__',
-            method_args=[]
-        )
-        self.session_id = response.get('session_id')
-        if not self.session_id:
-            raise NodeError("Failed to get a session ID for the remote object.")
+        logger.info(f"RemoteObjectExecutionNode '{self.name}' connected and ready to stream.")
 
     async def cleanup(self):
         """Disconnects the remote execution client."""
@@ -150,8 +135,9 @@ class RemoteObjectExecutionNode(Node):
         
         if self.is_streaming:
             try:
+                # The stream_object method now handles the initialization and streaming
                 async for result in self.client.stream_object(
-                    session_id=self.session_id,
+                    obj_to_execute=self.obj_to_execute,
                     config=self.node_config,
                     input_stream=data
                 ):
@@ -160,11 +146,9 @@ class RemoteObjectExecutionNode(Node):
                 self.logger.error(f"Error streaming object remotely: {e}", exc_info=True)
                 raise NodeError("Remote object stream failed") from e
         else:
-            # Non-streaming case: process a single item
+            # Non-streaming case needs a different RPC call, which is not the focus here.
+            # This part of the logic needs to be revisited.
             try:
-                # TODO: The `execute_object_method` is likely incorrect for this use case,
-                # as it re-sends the object every time. A new client method that
-                # executes a method on an existing session_id is needed.
                 result = await self.client.execute_object_method(
                     obj=self.obj_to_execute,
                     method_name='process',

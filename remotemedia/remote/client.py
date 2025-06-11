@@ -38,7 +38,7 @@ except ImportError:
     types_pb2 = None
 
 logger = logging.getLogger(__name__)
-
+logger.setLevel(logging.DEBUG)
 
 class RemoteExecutionClient:
     """
@@ -240,42 +240,47 @@ class RemoteExecutionClient:
             logger.error(f"Error streaming {node_type} remotely: {e}")
             raise RemoteExecutionError(f"Remote stream failed: {e}") from e
     
-    async def stream_object(self, 
-                            session_id: str, 
-                            input_stream: AsyncGenerator[Any, None], 
-                            config: Optional[Dict[str, Any]] = None,
-                            obj: Optional[Any] = None) -> AsyncGenerator[Any, None]:
+    async def stream_object(self,
+                            obj_to_execute: Any,
+                            input_stream: AsyncGenerator[Any, None],
+                            config: Optional[Dict[str, Any]] = None) -> AsyncGenerator[Any, None]:
         """
-        Stream data to a remote object that is already initialized and identified by a session_id.
+        Stream an object to the server for execution. The first message sent
+        initializes the object on the server, and subsequent messages stream data to it.
         """
         if not self.stub:
             raise ConnectionError("Client not connected.")
 
+        packager = CodePackager()
+        code_package = packager.package_object(obj_to_execute)
+
         async def request_generator():
-            # First, send the initialization message with session info.
-            # This must be sent immediately to establish the stream with the server,
-            # even if the input data stream is slow to produce its first item.
-            yield execution_pb2.StreamObjectRequest(
-                session_id=session_id,
-                config_json=json.dumps(config or {})
+            # First, send the initialization message.
+            logger.debug("Sending StreamObjectInit message")
+            init_msg = execution_pb2.StreamObjectInit(
+                code_package=code_package,
+                config={k: str(v) for k, v in (config or {}).items()},
+                serialization_format="pickle"
             )
+            yield execution_pb2.StreamObjectRequest(init=init_msg)
 
-            # Then, stream the data chunks as they arrive.
+            # Then, stream the data chunks.
+            logger.debug("Starting to stream data chunks")
             async for data_chunk in input_stream:
-                chunk = execution_pb2.Chunk(content=pickle.dumps(data_chunk))
-                request = execution_pb2.StreamObjectRequest(chunk=chunk)
-                yield request
+                serialized_data = pickle.dumps(data_chunk)
+                yield execution_pb2.StreamObjectRequest(data=serialized_data)
+            logger.debug("Finished streaming data chunks")
 
-        logger.debug(f"Streaming to remote object with session_id: {session_id}")
+        logger.debug(f"Streaming object '{obj_to_execute.__class__.__name__}' to remote for execution.")
         
         try:
             stream = self.stub.StreamObject(request_generator())
             async for response in stream:
-                if response.error:
+                if response.HasField("error"):
                     raise RemoteExecutionError(f"Remote stream error: {response.error}")
                 
-                if response.result:
-                    result_data = pickle.loads(response.result.content)
+                if response.HasField("data"):
+                    result_data = pickle.loads(response.data)
                     yield result_data
         except grpc.aio.AioRpcError as e:
             logger.error(f"gRPC error during object stream: {e.details()}", exc_info=True)
