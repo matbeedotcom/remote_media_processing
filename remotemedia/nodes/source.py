@@ -198,7 +198,7 @@ class VideoTrackSource(TrackSource):
                 f"VideoTrackSource '{self.name}': processed video frame with "
                 f"resolution {frame.width}x{frame.height}."
             )
-            return video_data
+            return (video_data, frame.pts)
         except Exception as e:
             logger.error(f"Error converting video frame to numpy array: {e}")
             return None
