@@ -64,21 +64,25 @@ class TestPipeline:
         pipeline.add_node(node1)
         pipeline.add_node(node2)
         
-        with pipeline.managed_execution():
+        async def input_generator():
+            yield "input"
+
+        async with pipeline.managed_execution():
             final_result = None
-            async for result in pipeline.process("input"):
+            async for result in pipeline.process(input_generator()):
                 final_result = result
             
         assert final_result == "step2"
         assert node1.process_called
         assert node2.process_called
     
-    def test_empty_pipeline_error(self):
+    @pytest.mark.asyncio
+    async def test_empty_pipeline_error(self):
         """Test that empty pipeline raises error."""
         pipeline = Pipeline()
         
         with pytest.raises(PipelineError, match="Cannot initialize empty pipeline"):
-            pipeline.initialize()
+            await pipeline.initialize()
     
     @pytest.mark.asyncio
     async def test_uninitialized_processing_error(self):
@@ -86,9 +90,12 @@ class TestPipeline:
         pipeline = Pipeline()
         pipeline.add_node(MockNode())
         
+        async def input_generator():
+            yield "data"
+
         with pytest.raises(PipelineError, match="Pipeline must be initialized"):
             # We need to try to start the async generator to trigger the check
-            p = pipeline.process("data")
+            p = pipeline.process(input_generator())
             await p.asend(None)
     
     def test_pipeline_iteration(self):

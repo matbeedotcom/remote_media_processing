@@ -3,7 +3,7 @@ Base Node class and remote execution configuration.
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Union
 from dataclasses import dataclass
 import logging
 
@@ -35,20 +35,75 @@ class RemoteExecutorConfig:
         if self.timeout <= 0:
             raise ConfigurationError(f"Invalid timeout: {self.timeout}")
 
+    def __call__(self, target: Union[str, "Node"], **kwargs) -> "Node":
+        """
+        Create a remote execution node from this configuration.
+
+        This method acts as a smart factory. It inspects the `target` argument
+        and returns the appropriate remote node wrapper.
+
+        - If `target` is a string, it returns a `RemoteExecutionNode`, which
+          tells the server to instantiate a node with that class name.
+        - If `target` is a `Node` object instance, it returns a
+          `RemoteObjectExecutionNode`, which serializes the object and sends
+          it to the server for execution.
+
+        Example:
+            config = RemoteExecutorConfig(host="localhost", port=50051)
+            
+            # Use case 1: Run a pre-registered node on the server by its class name.
+            # This creates a RemoteExecutionNode.
+            remote_node = config("WhisperTranscriptionNode", node_config={"model": "large-v3"})
+
+            # Use case 2: Run a local node object on the server.
+            # This creates a RemoteObjectExecutionNode.
+            local_node = MyCustomFilterNode(strength=0.8)
+            remote_node = config(local_node)
+
+        Args:
+            target (Union[str, "Node"]): The node to execute remotely. This can be
+                the class name (str) of a node known to the server, or a local
+                Node instance to be serialized and executed.
+            **kwargs: Additional arguments for the remote node's constructor.
+                      For `RemoteExecutionNode`, this can include `node_config`.
+
+        Returns:
+            A `RemoteExecutionNode` or `RemoteObjectExecutionNode` instance.
+        """
+        # Local import to avoid circular dependencies
+        from ..nodes.remote import RemoteExecutionNode, RemoteObjectExecutionNode
+
+        if isinstance(target, str):
+            return RemoteExecutionNode(
+                node_class_name=target,
+                remote_config=self,
+                **kwargs
+            )
+        elif isinstance(target, Node):
+            # The object to execute is the target itself
+            return RemoteObjectExecutionNode(
+                node_object=target,
+                remote_config=self,
+                **kwargs
+            )
+        else:
+            raise TypeError(
+                "Target for remote execution must be a node class name (str) or a Node object."
+            )
+
 
 class Node(ABC):
     """
     Base class for all processing nodes in the pipeline.
     
-    A Node represents a single processing step that can be executed
-    locally or remotely. Each node must implement the process() method
-    to define its processing logic.
+    A Node represents a single processing step. The core logic is in the
+    `process` method. Nodes are chained together in a `Pipeline` to create
+    complex data flows.
     """
     
     def __init__(
         self,
         name: Optional[str] = None,
-        remote_config: Optional[RemoteExecutorConfig] = None,
         **kwargs
     ):
         """
@@ -56,11 +111,9 @@ class Node(ABC):
         
         Args:
             name: Optional name for the node (defaults to class name)
-            remote_config: Configuration for remote execution
             **kwargs: Additional node-specific parameters
         """
         self.name = name or self.__class__.__name__
-        self.remote_config = remote_config
         self.config = kwargs
         self._is_initialized = False
         self.logger = logging.getLogger(self.__class__.__name__)
@@ -91,6 +144,7 @@ class Node(ABC):
         
         This method is called once before the first process() call.
         Override this method to perform any setup required by the node.
+        For remote nodes, this method runs on the remote server.
         """
         if self._is_initialized:
             return
@@ -109,11 +163,6 @@ class Node(ABC):
         self._is_initialized = False
     
     @property
-    def is_remote(self) -> bool:
-        """Check if this node is configured for remote execution."""
-        return self.remote_config is not None
-    
-    @property
     def is_initialized(self) -> bool:
         """Check if this node has been initialized."""
         return self._is_initialized
@@ -123,11 +172,9 @@ class Node(ABC):
         return {
             "name": self.name,
             "class": self.__class__.__name__,
-            "remote_config": self.remote_config,
             "config": self.config,
         }
     
     def __repr__(self) -> str:
         """String representation of the node."""
-        remote_str = " (remote)" if self.is_remote else ""
-        return f"{self.__class__.__name__}(name='{self.name}'){remote_str}" 
+        return f"{self.__class__.__name__}(name='{self.name}')" 

@@ -56,40 +56,37 @@ class AudioTransform(Node):
             logger.warning(f"AudioTransform '{self.name}': audio data is not a numpy array.")
             return data
 
-        # Ensure audio_data is at least 2D
-        if audio_data.ndim == 1:
-            audio_data = audio_data.reshape(1, -1)
-
-        input_channels = audio_data.shape[0]
-
         # Resample if necessary
         if input_sample_rate != self.output_sample_rate:
             # librosa.resample works with mono or multi-channel.
-            # y (np.ndarray): audio time series. Multi-channel is supported.
             audio_data = librosa.resample(
                 y=audio_data, orig_sr=input_sample_rate, target_sr=self.output_sample_rate
             )
 
+        # Ensure audio_data is 2D before channel manipulation
+        if audio_data.ndim == 1:
+            audio_data = audio_data.reshape(1, -1)
+
+        current_channels = audio_data.shape[0]
+
         # Mix channels if necessary
-        if input_channels != self.output_channels:
+        if current_channels != self.output_channels:
             if self.output_channels == 1:
                 # Mix down to mono
                 audio_data = librosa.to_mono(y=audio_data)
-                audio_data = audio_data.reshape(1, -1)  # ensure it is 2d
-            elif input_channels == 1 and self.output_channels > 1:
-                # upmix mono to multi-channel by duplicating the channel
+            elif current_channels == 1 and self.output_channels > 1:
+                # Upmix mono to multi-channel
                 audio_data = np.tile(audio_data, (self.output_channels, 1))
             else:
-                # For other cases (e.g., 5.1 to stereo), it's more complex.
-                # A simple approach is to take the first `output_channels`.
-                # This is a simplification.
+                # Fallback for other conversions (e.g., 5.1 to stereo)
+                # by taking the first `output_channels`.
                 logger.warning(
                     f"AudioTransform '{self.name}': complex channel conversion from "
-                    f"{input_channels} to {self.output_channels} is simplified "
+                    f"{current_channels} to {self.output_channels} is simplified "
                     "by taking the first channels."
                 )
                 audio_data = audio_data[: self.output_channels, :]
-
+        
         logger.debug(
             f"AudioTransform '{self.name}': processed audio to "
             f"{self.output_sample_rate}Hz and {self.output_channels} channels."
@@ -213,4 +210,74 @@ class AudioResampler(Node):
         return data
 
 
-__all__ = ["AudioTransform", "AudioBuffer", "AudioResampler"] 
+class ExtractAudioDataNode(Node):
+    """
+    A simple node that extracts the audio ndarray from a (data, rate) tuple.
+    It also flattens the array to ensure it is 1D, as required by many
+    Hugging Face audio models.
+    """
+    def process(self, data: Any) -> Any:
+        """
+        Expects a tuple of (audio_data, sample_rate) and returns a flattened
+        1D numpy array of the audio data.
+        """
+        if isinstance(data, tuple) and len(data) == 2 and isinstance(data[0], np.ndarray):
+            # Flatten to ensure it's a 1D array for models that require it
+            return data[0].flatten()
+        
+        logger.warning(
+            f"{self.__class__.__name__} '{self.name}': received data in "
+            "unexpected format. Expected a (ndarray, int) tuple. Returning None."
+        )
+        return None
+
+
+class ConcatenateAudioNode(Node):
+    """
+    A streaming-aware node that consumes an entire audio stream, concatenates
+    all chunks, and yields a single (audio_data, sample_rate) tuple at the end.
+    The output audio is flattened to a 1D array (mono).
+    """
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.is_streaming = True
+        self._buffer = []
+        self._sample_rate = None
+
+    async def process(self, data_stream: Any) -> Any:
+        """
+        Consumes the data_stream and yields a single concatenated result.
+        """
+        async for data in data_stream:
+            if not isinstance(data, tuple) or len(data) != 2:
+                logger.warning(f"ConcatenateAudioNode received non-tuple data: {type(data)}. Skipping.")
+                continue
+            
+            audio_chunk, sample_rate = data
+
+            if not isinstance(audio_chunk, np.ndarray):
+                logger.warning(f"ConcatenateAudioNode received non-numpy data: {type(audio_chunk)}. Skipping.")
+                continue
+
+            if self._sample_rate is None:
+                self._sample_rate = sample_rate
+            elif self._sample_rate != sample_rate:
+                logger.error("Sample rate changed mid-stream. This is not supported by ConcatenateAudioNode.")
+                return
+
+            self._buffer.append(audio_chunk)
+        
+        # After the stream is exhausted, concatenate and yield.
+        if self._buffer:
+            # If chunks are 2D (channels, samples), concatenate along samples axis
+            axis = 1 if self._buffer[0].ndim > 1 else 0
+            full_audio = np.concatenate(self._buffer, axis=axis)
+
+            # Flatten to a 1D array (mono) as expected by many models
+            final_audio = full_audio.flatten()
+            
+            logger.info(f"Concatenated audio to a single clip of {final_audio.shape[0] / self._sample_rate:.2f}s.")
+            yield (final_audio, self._sample_rate)
+
+
+__all__ = ["AudioTransform", "AudioBuffer", "AudioResampler", "ExtractAudioDataNode", "ConcatenateAudioNode"] 

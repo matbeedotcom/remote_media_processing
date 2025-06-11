@@ -14,7 +14,14 @@ import signal
 import sys
 import time
 from concurrent import futures
-from typing import Dict, Any, AsyncIterable, AsyncGenerator
+from typing import Dict, Any, AsyncIterable, AsyncGenerator, AsyncIterator, Tuple
+import inspect
+from concurrent.futures import ThreadPoolExecutor
+import uuid
+import json
+import pickle
+import shutil
+import multiprocessing
 
 import grpc
 from grpc_health.v1 import health_pb2_grpc
@@ -24,15 +31,19 @@ from grpc_health.v1.health_pb2 import HealthCheckResponse
 import execution_pb2
 import execution_pb2_grpc
 import types_pb2
+import zipfile
+import io
+import tempfile
+import base64
 
 # Import service components
 from config import ServiceConfig
 from executor import TaskExecutor
 from sandbox import SandboxManager
-import inspect
 from remotemedia.core.node import Node
 from remotemedia.serialization import PickleSerializer, JSONSerializer
 import cloudpickle
+import numpy as np
 
 
 class RemoteExecutionServicer(execution_pb2_grpc.RemoteExecutionServiceServicer):
@@ -55,6 +66,7 @@ class RemoteExecutionServicer(execution_pb2_grpc.RemoteExecutionServiceServicer)
         self.success_count = 0
         self.error_count = 0
         self.active_sessions: Dict[str, Any] = {}
+        self.object_sessions: Dict[str, Any] = {}
         
         self.logger = logging.getLogger(__name__)
         self.logger.info("RemoteExecutionServicer initialized")
@@ -173,65 +185,135 @@ class RemoteExecutionServicer(execution_pb2_grpc.RemoteExecutionServiceServicer)
                 metrics=self._build_error_metrics(start_time)
             )
     
-    async def StreamObject(
+    async def ExecuteObjectMethod(
         self,
-        request_iterator: AsyncIterable[execution_pb2.StreamObjectRequest],
+        request: execution_pb2.ExecuteObjectMethodRequest,
         context: grpc.aio.ServicerContext
-    ) -> AsyncGenerator[execution_pb2.StreamObjectResponse, None]:
-        """
-        Handle bidirectional streaming for a serialized object.
-        """
-        self.logger.info("New StreamObject connection opened.")
+    ) -> execution_pb2.ExecuteObjectMethodResponse:
+        """Execute a method on a serialized object, using session management."""
+        self.logger.info("Executing ExecuteObjectMethod")
+        
+        session_id = request.session_id
         obj = None
+        sandbox_path = None
         
         try:
-            # First message is initialization
-            init_request_data = await anext(request_iterator)
-            if not init_request_data.HasField("init"):
+            if session_id:
+                if session_id in self.object_sessions:
+                    # Use existing object from session
+                    obj = self.object_sessions[session_id]['object']
+                    self.logger.info(f"Using existing object from session {session_id}")
+                else:
+                    raise ValueError("Session not found")
+            else:
+                # Create new object and session
+                session_id = str(uuid.uuid4())
+                self.logger.info(f"Creating new session {session_id}")
+                
+                # Setup sandbox and load object
+                sandbox_path = tempfile.mkdtemp(prefix="remotemedia_")
+                with io.BytesIO(request.code_package) as bio:
+                    with zipfile.ZipFile(bio, 'r') as zf:
+                        zf.extractall(sandbox_path)
+                
+                sys.path.insert(0, os.path.join(sandbox_path, "code"))
+                
+                object_pkl_path = os.path.join(sandbox_path, "serialized_object.pkl")
+                with open(object_pkl_path, 'r') as f:
+                    encoded_obj = f.read()
+                
+                obj = cloudpickle.loads(base64.b64decode(encoded_obj))
+                
+                self.object_sessions[session_id] = {
+                    "object": obj,
+                    "sandbox_path": sandbox_path
+                }
+                self.logger.info(f"remote_service.ExecuteObjectMethod: Object sessions: {self.object_sessions}")
+
+                # Initialize object if it has an initialize method
+                if hasattr(obj, 'initialize') and callable(getattr(obj, 'initialize')):
+                    print(f"remote_service.ExecuteObjectMethod: Initializing object {obj} with method {obj.initialize}")
+                    await obj.initialize()
+                    self.logger.info(f"remote_service.ExecuteObjectMethod: Object {obj} initialized")
+
+            # Deserialize arguments
+            serializer = PickleSerializer() if request.serialization_format == 'pickle' else JSONSerializer()
+            method_args = serializer.deserialize(request.method_args_data)
+
+            # Get and call method
+            method = getattr(obj, request.method_name)
+            
+            if asyncio.iscoroutinefunction(method):
+                result = await method(*method_args)
+            else:
+                result = method(*method_args)
+
+            if inspect.isasyncgen(result):
+                result = await result.__anext__()
+
+            result_data = serializer.serialize(result)
+
+            return execution_pb2.ExecuteObjectMethodResponse(
+                status=types_pb2.EXECUTION_STATUS_SUCCESS,
+                result_data=result_data,
+                session_id=session_id
+            )
+        except Exception as e:
+            self.logger.error(f"Error during ExecuteObjectMethod: {e}", exc_info=True)
+            return execution_pb2.ExecuteObjectMethodResponse(
+                status=types_pb2.EXECUTION_STATUS_ERROR,
+                error_message=str(e),
+                error_traceback=self._get_traceback()
+            )
+        # Note: We are not cleaning up the session here. A separate mechanism
+        # for session timeout/cleanup would be needed in a production system.
+    
+    async def StreamObject(self, request_iterator: AsyncIterator[execution_pb2.StreamObjectRequest],
+                           context: grpc.aio.ServicerContext) -> AsyncGenerator[execution_pb2.StreamObjectResponse, None]:
+        obj = None
+        sandbox_path = None
+        try:
+            # First message must be an init message
+            init_request = await anext(request_iterator)
+            if not init_request.HasField("init"):
                 yield execution_pb2.StreamObjectResponse(error="Stream must be initialized with a StreamObjectInit message.")
                 return
 
-            init_request = init_request_data.init
+            init_payload = init_request.init
+            self.logger.info(f"New StreamObject request. Config: {init_payload.config}")
             
-            try:
-                obj = cloudpickle.loads(init_request.serialized_object)
-            except Exception as e:
-                self.logger.error(f"Failed to deserialize object: {e}")
-                yield execution_pb2.StreamObjectResponse(error=f"Failed to deserialize object: {e}")
-                return
+            # 1. Deserialize the object
+            sandbox_path, obj = self._deserialize_object(init_payload.code_package)
 
-            # Check for required methods
-            if not hasattr(obj, 'initialize') or not hasattr(obj, 'process') or not hasattr(obj, 'cleanup'):
-                 yield execution_pb2.StreamObjectResponse(error="Serialized object must have initialize, process, and cleanup methods.")
-                 return
-
+            # 2. Initialize the object
+            self.logger.info(f"Initializing remote object: {obj.__class__.__name__}")
             await obj.initialize()
+            self.logger.info("Remote object initialized successfully.")
 
-            serialization_format = init_request.serialization_format
-            if serialization_format == 'pickle':
-                serializer = PickleSerializer()
-            elif serialization_format == 'json':
-                serializer = JSONSerializer()
-            else:
-                 yield execution_pb2.StreamObjectResponse(error=f"Unsupported serialization format: {serialization_format}")
-                 return
-
-            async def input_stream_generator():
+            # Create an input stream for the node's process method directly from the request iterator
+            async def processor_input_stream():
+                self.logger.info("Processor input stream started.")
+                count = 0
                 async for req in request_iterator:
+                    count += 1
+                    self.logger.debug(f"Server received data chunk {count}")
                     if req.HasField("data"):
-                        yield serializer.deserialize(req.data)
+                        yield pickle.loads(req.data)
+                self.logger.info(f"Processor input stream finished after {count} chunks.")
 
-            # Assumes obj.process is an async generator
-            async for result in obj.process(input_stream_generator()):
-                serialized_result = serializer.serialize(result)
+            # Process the stream
+            async for result in obj.process(processor_input_stream()):
+                serialized_result = pickle.dumps(result)
                 yield execution_pb2.StreamObjectResponse(data=serialized_result)
 
         except Exception as e:
-            self.logger.error(f"Error during StreamObject execution: {e}")
-            yield execution_pb2.StreamObjectResponse(error=f"Error during execution: {e}")
+            self.logger.error(f"Error during StreamObject execution: {e}", exc_info=True)
+            yield execution_pb2.StreamObjectResponse(error=f"Error on server: {e}")
         finally:
             if obj and hasattr(obj, 'cleanup'):
                 await obj.cleanup()
+            if sandbox_path:
+                self._cleanup_sandbox(sandbox_path)
             self.logger.info("StreamObject connection closed.")
     
     async def StreamNode(
@@ -247,10 +329,12 @@ class RemoteExecutionServicer(execution_pb2_grpc.RemoteExecutionServiceServicer)
         """
         self.logger.info("New StreamNode connection opened.")
         node = None
+        loop = asyncio.get_running_loop()
+        executor = ThreadPoolExecutor()
         
         try:
             # The first message is the initialization message
-            init_request_data = await anext(request_iterator)
+            init_request_data = await request_iterator.__anext__()
             if not init_request_data.HasField("init"):
                 context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
                 context.set_details("Stream must be initialized with a StreamInit message.")
@@ -288,6 +372,7 @@ class RemoteExecutionServicer(execution_pb2_grpc.RemoteExecutionServiceServicer)
             
             NodeClass = getattr(nodes, node_type)
             node = NodeClass(**config)
+            print(f"remote_service.StreamNode: Initializing node {node} with method {node.initialize}")
             await node.initialize()
 
             # Get the correct serializer
@@ -318,7 +403,7 @@ class RemoteExecutionServicer(execution_pb2_grpc.RemoteExecutionServiceServicer)
                     if inspect.iscoroutinefunction(node.process):
                         result = await node.process(item)
                     else:
-                        result = node.process(item)
+                        result = await loop.run_in_executor(executor, node.process, item)
                     if result is not None:
                         serialized_result = serializer.serialize(result)
                         yield execution_pb2.StreamData(data=serialized_result)
@@ -364,7 +449,7 @@ class RemoteExecutionServicer(execution_pb2_grpc.RemoteExecutionServiceServicer)
             total_requests=self.request_count,
             successful_requests=self.success_count,
             failed_requests=self.error_count,
-            active_sessions=len(self.active_sessions),
+            active_sessions=len(self.object_sessions),
             available_workers=self.config.max_workers,
             busy_workers=0  # TODO: Implement worker tracking
         )
@@ -457,6 +542,31 @@ class RemoteExecutionServicer(execution_pb2_grpc.RemoteExecutionServiceServicer)
             )
         return execution_pb2.StreamCloseResponse(session_id=session_id)
 
+    def _deserialize_object(self, code_package: bytes) -> Tuple[str, Any]:
+        # Implementation of _deserialize_object method
+        # This is a placeholder and should be replaced with the actual implementation
+        # based on your deserialization logic
+        sandbox_path = tempfile.mkdtemp(prefix="remotemedia_")
+        with io.BytesIO(code_package) as bio:
+            with zipfile.ZipFile(bio, 'r') as zf:
+                zf.extractall(sandbox_path)
+        
+        sys.path.insert(0, os.path.join(sandbox_path, "code"))
+        
+        object_pkl_path = os.path.join(sandbox_path, "serialized_object.pkl")
+        with open(object_pkl_path, 'r') as f:
+            encoded_obj = f.read()
+        
+        obj = cloudpickle.loads(base64.b64decode(encoded_obj))
+        
+        return sandbox_path, obj
+
+    def _cleanup_sandbox(self, sandbox_path: str):
+        # Implementation of _cleanup_sandbox method
+        # This is a placeholder and should be replaced with the actual implementation
+        # based on your sandbox cleanup logic
+        shutil.rmtree(sandbox_path)
+
 
 class HealthServicer(health_pb2_grpc.HealthServicer):
     """Health check servicer for the gRPC server."""
@@ -481,7 +591,13 @@ async def serve():
     logger = logging.getLogger(__name__)
     
     # Create gRPC server
-    server = grpc.aio.server(futures.ThreadPoolExecutor(max_workers=config.max_workers))
+    server = grpc.aio.server(
+        futures.ThreadPoolExecutor(max_workers=config.max_workers),
+        options=[
+            ('grpc.max_receive_message_length', -1),
+            ('grpc.max_send_message_length', -1)
+        ]
+    )
     
     # Add servicers
     execution_pb2_grpc.add_RemoteExecutionServiceServicer_to_server(
@@ -490,7 +606,7 @@ async def serve():
     health_pb2_grpc.add_HealthServicer_to_server(HealthServicer(), server)
     
     # Configure server
-    listen_addr = f'127.0.0.1:{config.grpc_port}'
+    listen_addr = f'0.0.0.0:{config.grpc_port}'
     server.add_insecure_port(listen_addr)
     
     # Start server
@@ -512,6 +628,12 @@ async def serve():
 
 if __name__ == '__main__':
     try:
+        # Set the multiprocessing start method to 'spawn' for CUDA compatibility,
+        # as required by libraries like PyTorch and vLLM when using GPUs.
+        # This must be done at the entry point of the application before any
+        # CUDA-related code is initialized.
+        if sys.platform != "win32":
+            multiprocessing.set_start_method('spawn', force=True)
         asyncio.run(serve())
     except KeyboardInterrupt:
         print("Server interrupted")

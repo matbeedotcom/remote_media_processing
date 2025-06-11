@@ -20,7 +20,7 @@ async def test_system():
     
     config = RemoteExecutorConfig(
         host='localhost', 
-        port=50051, 
+        port=50052, 
         protocol='grpc', 
         timeout=30.0, 
         ssl_enabled=False
@@ -82,7 +82,7 @@ async def test_calculator_simulation():
     
     config = RemoteExecutorConfig(
         host='localhost', 
-        port=50051, 
+        port=50052, 
         protocol='grpc', 
         timeout=30.0, 
         ssl_enabled=False

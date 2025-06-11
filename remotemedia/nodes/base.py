@@ -11,48 +11,65 @@ logger = logging.getLogger(__name__)
 
 
 class PassThroughNode(Node):
-    """A node that passes data through without modification."""
-    
-    def process(self, data: Any) -> Any:
-        """Pass data through unchanged."""
-        logger.debug(f"PassThroughNode '{self.name}': passing through data")
+    """
+    A node that simply passes data through without modification.
+    Useful for debugging and testing pipeline connections.
+    """
+    async def process(self, data: Any) -> Any:
         return data
 
 
-class BufferNode(Node):
-    """A node that buffers data for batch processing."""
+class BatchingNode(Node):
+    """
+    A node that buffers a specific number of items for batch processing.
+    When the batch size is reached, it emits a list of the buffered items.
+    """
     
-    def __init__(self, buffer_size: int = 10, **kwargs):
+    def __init__(self, batch_size: int = 10, **kwargs):
         """
-        Initialize the buffer node.
+        Initialize the batching node.
         
         Args:
-            buffer_size: Maximum number of items to buffer
+            batch_size: Maximum number of items to buffer in a batch.
             **kwargs: Additional node parameters
         """
         super().__init__(**kwargs)
-        self.buffer_size = buffer_size
+        self.batch_size = batch_size
         self.buffer: List[Any] = []
     
     def process(self, data: Any) -> Any:
-        """Buffer data and return when buffer is full."""
+        """Buffer data and return when the batch is full."""
         self.buffer.append(data)
-        logger.debug(f"BufferNode '{self.name}': buffered item ({len(self.buffer)}/{self.buffer_size})")
+        logger.debug(f"BatchingNode '{self.name}': buffered item ({len(self.buffer)}/{self.batch_size})")
         
-        if len(self.buffer) >= self.buffer_size:
+        if len(self.buffer) >= self.batch_size:
             result = self.buffer.copy()
             self.buffer.clear()
-            logger.debug(f"BufferNode '{self.name}': returning buffer of {len(result)} items")
+            logger.debug(f"BatchingNode '{self.name}': returning batch of {len(result)} items")
             return result
         
-        return None  # No output until buffer is full
+        return None  # No output until batch is full
     
     def flush(self) -> List[Any]:
-        """Flush the current buffer and return its contents."""
+        """Flush the current buffer and return its contents as a final batch."""
         result = self.buffer.copy()
         self.buffer.clear()
-        logger.debug(f"BufferNode '{self.name}': flushed buffer of {len(result)} items")
+        logger.debug(f"BatchingNode '{self.name}': flushed buffer of {len(result)} items")
         return result
 
 
-__all__ = ["PassThroughNode", "BufferNode"] 
+class TakeFirstItem(Node):
+    """
+    A node that takes only the first item from a stream and then ignores the rest.
+    """
+    _produced = False
+    
+    async def process(self, data: Any) -> Any:
+        if not self._produced:
+            self._produced = True
+            return data
+        # Return nothing for subsequent calls
+        return None
+
+
+__all__ = ["PassThroughNode", "BatchingNode", "TakeFirstItem"] 

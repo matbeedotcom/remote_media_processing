@@ -42,7 +42,7 @@ async def main():
     test_data = {"audio": "sample_audio_data", "video": "sample_video_data"}
     
     try:
-        with pipeline.managed_execution():
+        async with pipeline.managed_execution():
             print(f"\nProcessing data: {test_data}")
             async for result in pipeline.process(test_data):
                 print(f"Result: {result}")

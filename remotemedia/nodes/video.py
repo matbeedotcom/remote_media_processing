@@ -4,10 +4,43 @@ Video processing nodes for the RemoteMedia SDK.
 
 from typing import Any, Tuple
 import logging
+from .base import TakeFirstItem
 
 from ..core.node import Node
 
 logger = logging.getLogger(__name__)
+
+
+try:
+    import av
+    AV_AVAILABLE = True
+except ImportError:
+    AV_AVAILABLE = False
+
+
+class DecodeVideoFrame(Node):
+    """
+    Decodes a raw video packet (from PyAV) into a PIL Image.
+    """
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        if not AV_AVAILABLE:
+            raise ImportError("PyAV is not installed. Please install it with 'pip install av'.")
+
+    async def process(self, frame: "av.VideoFrame"):
+        """Decodes the video frame into a PIL image."""
+        if not isinstance(frame, av.VideoFrame):
+            logger.warning(f"DecodeVideoFrame expected av.VideoFrame, got {type(frame)}. Skipping.")
+            return None
+        return frame.to_image()
+
+
+class TakeFirstFrameNode(TakeFirstItem):
+    """
+    A node that takes only the first video frame from a stream and then
+    ignores the rest. This is a convenience alias for TakeFirstItem.
+    """
+    pass
 
 
 class VideoTransform(Node):
@@ -48,4 +81,4 @@ class VideoResizer(Node):
         return data
 
 
-__all__ = ["VideoTransform", "VideoBuffer", "VideoResizer"] 
+__all__ = ["DecodeVideoFrame", "TakeFirstFrameNode", "VideoTransform", "VideoBuffer", "VideoResizer"] 

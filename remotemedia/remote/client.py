@@ -7,13 +7,16 @@ the remote execution service via gRPC.
 
 import asyncio
 import logging
-from typing import Any, Dict, Optional, List, AsyncGenerator
+from typing import Any, Dict, Optional, List, AsyncGenerator, Tuple
 import grpc
 import cloudpickle
+import json
+import pickle
 
 from ..core.exceptions import RemoteExecutionError
 from ..core.node import RemoteExecutorConfig
 from ..serialization import JSONSerializer, PickleSerializer
+from ..packaging.code_packager import CodePackager
 
 # These will be generated from the proto files
 try:
@@ -35,21 +38,23 @@ except ImportError:
     types_pb2 = None
 
 logger = logging.getLogger(__name__)
-
+logger.setLevel(logging.DEBUG)
 
 class RemoteExecutionClient:
     """
     Client for communicating with the remote execution service.
     """
     
-    def __init__(self, config: RemoteExecutorConfig):
+    def __init__(self, config: RemoteExecutorConfig, channel_options: Optional[List[Tuple[str, Any]]] = None):
         """
         Initialize the remote execution client.
         
         Args:
             config: Remote executor configuration
+            channel_options: Optional list of gRPC channel options.
         """
         self.config = config
+        self.channel_options = channel_options
         self.channel: Optional[grpc.aio.Channel] = None
         self.stub: Optional[Any] = None
         
@@ -77,11 +82,13 @@ class RemoteExecutionClient:
                 credentials = grpc.ssl_channel_credentials()
                 self.channel = grpc.aio.secure_channel(
                     f"{self.config.host}:{self.config.port}",
-                    credentials
+                    credentials,
+                    options=self.channel_options
                 )
             else:
                 self.channel = grpc.aio.insecure_channel(
-                    f"{self.config.host}:{self.config.port}"
+                    f"{self.config.host}:{self.config.port}",
+                    options=self.channel_options
                 )
             
             # Create stub
@@ -233,15 +240,64 @@ class RemoteExecutionClient:
             logger.error(f"Error streaming {node_type} remotely: {e}")
             raise RemoteExecutionError(f"Remote stream failed: {e}") from e
     
-    async def stream_object(
+    async def stream_object(self,
+                            obj_to_execute: Any,
+                            input_stream: AsyncGenerator[Any, None],
+                            config: Optional[Dict[str, Any]] = None) -> AsyncGenerator[Any, None]:
+        """
+        Stream an object to the server for execution. The first message sent
+        initializes the object on the server, and subsequent messages stream data to it.
+        """
+        if not self.stub:
+            raise ConnectionError("Client not connected.")
+
+        packager = CodePackager()
+        code_package = packager.package_object(obj_to_execute)
+
+        async def request_generator():
+            # First, send the initialization message.
+            logger.debug("Sending StreamObjectInit message")
+            init_msg = execution_pb2.StreamObjectInit(
+                code_package=code_package,
+                config={k: str(v) for k, v in (config or {}).items()},
+                serialization_format="pickle"
+            )
+            yield execution_pb2.StreamObjectRequest(init=init_msg)
+
+            # Then, stream the data chunks.
+            logger.debug("Starting to stream data chunks")
+            chunk_count = 0
+            async for data_chunk in input_stream:
+                serialized_data = pickle.dumps(data_chunk)
+                yield execution_pb2.StreamObjectRequest(data=serialized_data)
+                chunk_count += 1
+            logger.debug(f"Finished streaming data chunks. Total sent: {chunk_count}")
+
+        logger.debug(f"Streaming object '{obj_to_execute.__class__.__name__}' to remote for execution.")
+        
+        try:
+            stream = self.stub.StreamObject(request_generator())
+            async for response in stream:
+                if response.HasField("error"):
+                    raise RemoteExecutionError(f"Remote stream error: {response.error}")
+                
+                if response.HasField("data"):
+                    result_data = pickle.loads(response.data)
+                    yield result_data
+        except grpc.aio.AioRpcError as e:
+            logger.error(f"gRPC error during object stream: {e.details()}", exc_info=True)
+            raise RemoteExecutionError(f"gRPC error: {e.details()}") from e
+
+    async def execute_object_method(
         self,
         obj: Any,
-        config: Dict[str, Any],
-        input_stream: AsyncGenerator[Any, None],
-        serialization_format: str = "pickle"
-    ) -> AsyncGenerator[Any, None]:
+        method_name: str,
+        method_args: List[Any],
+        serialization_format: str = "pickle",
+        session_id: Optional[str] = None
+    ) -> Dict[str, Any]:
         """
-        Execute a serialized object with a streaming input/output.
+        Execute a method on a serialized object remotely using session management.
         """
         if not self.stub:
             raise RemoteExecutionError("Not connected to remote service")
@@ -249,33 +305,38 @@ class RemoteExecutionClient:
         serializer = self.serializers.get(serialization_format)
         if not serializer:
             raise ValueError(f"Unknown serialization format: {serialization_format}")
+        
+        serialized_args = serializer.serialize(method_args)
 
-        string_config = {k: str(v) for k, v in config.items()}
-        serialized_obj = cloudpickle.dumps(obj)
+        request_args = {
+            "serialization_format": serialization_format,
+            "method_name": method_name,
+            "method_args_data": serialized_args
+        }
 
-        async def request_generator():
-            init_message = execution_pb2.StreamObjectInit(
-                serialized_object=serialized_obj,
-                config=string_config,
-                serialization_format=serialization_format
-            )
-            yield execution_pb2.StreamObjectRequest(init=init_message)
+        if session_id:
+            request_args["session_id"] = session_id
+        else:
+            packager = CodePackager()
+            code_package = packager.package_object(obj)
+            request_args["code_package"] = code_package
 
-            async for item in input_stream:
-                serialized_data = serializer.serialize(item)
-                yield execution_pb2.StreamObjectRequest(data=serialized_data)
+        request = execution_pb2.ExecuteObjectMethodRequest(**request_args)
 
         try:
-            async for response in self.stub.StreamObject(request_generator()):
-                if response.HasField("error"):
-                    raise RemoteExecutionError(f"Remote stream error: {response.error}")
-                
-                output_data = serializer.deserialize(response.data)
-                yield output_data
-        
-        except grpc.aio.AioRpcError as e:
-            logger.error(f"gRPC stream error in stream_object: {e}")
-            raise RemoteExecutionError(f"gRPC stream failed: {e}") from e
+            response = await self.stub.ExecuteObjectMethod(request)
+            if response.status != types_pb2.EXECUTION_STATUS_SUCCESS:
+                raise RemoteExecutionError(response.error_message, response.error_traceback)
+            
+            result = serializer.deserialize(response.result_data)
+            
+            return {
+                "result": result,
+                "session_id": response.session_id
+            }
+        except Exception as e:
+            logger.error(f"Error executing remote object method: {e}")
+            raise
 
     async def execute_custom_task(
         self,

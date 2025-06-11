@@ -25,18 +25,20 @@ async def generate_audio_chunks(total_samples, sample_rate, chunk_sizes):
 @pytest.mark.parametrize("input_rate, output_rate, buffer_size", [
     (48000, 16000, 2048),
 ])
-async def test_remote_audio_resampling_pipeline(input_rate, output_rate, buffer_size):
+async def test_remote_audio_resampling_pipeline(grpc_server, input_rate, output_rate, buffer_size):
     """
     Test a pipeline with a remote node that resamples streaming audio data
     against a live, locally running server.
     """
     # 1. Setup the pipeline with the remote node
-    remote_config = RemoteExecutorConfig(host='127.0.0.1', port=50052, ssl_enabled=False)
+    REMOTE_HOST = os.environ.get("REMOTE_HOST", "127.0.0.1")
+
+    remote_config = RemoteExecutorConfig(host=REMOTE_HOST, port=50052, ssl_enabled=False)
     pipeline = Pipeline()
     pipeline.add_node(AudioBuffer(buffer_size_samples=buffer_size))
     pipeline.add_node(RemoteExecutionNode(
         name="RemoteAudioTransform",
-        node_to_execute="AudioTransform",
+        node_class_name="AudioTransform",
         remote_config=remote_config,
         node_config={'output_sample_rate': output_rate, 'output_channels': 1}
     ))

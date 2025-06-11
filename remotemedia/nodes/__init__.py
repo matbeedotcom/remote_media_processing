@@ -14,14 +14,17 @@ from .text_processor import *  # noqa: F401, F403
 from .serialized_class_executor import *  # noqa: F401, F403
 from .source import * # noqa: F401, F403
 from .remote import * # noqa: F401, F403
+from .sink import * # noqa: F401, F403
 from remotemedia.core.node import Node
 from .audio import AudioTransform, AudioBuffer, AudioResampler
 from .text_processor import TextProcessorNode
-from .transform import DataTransform
+from .transform import TransformNode
 from .video import VideoTransform, VideoBuffer, VideoResizer
 from .remote import RemoteExecutionNode, RemoteObjectExecutionNode
 from .serialized_class_executor import SerializedClassExecutorNode
 from .custom import StatefulCounter
+from .ml import WhisperTranscriptionNode, UltravoxNode, TransformersPipelineNode, Qwen2_5OmniNode
+# from .ml import WhisperTranscriptionNode, UltravoxNode
 
 # ML nodes will be added in later phases
 # from .ml import *  # noqa: F401, F403
@@ -37,6 +40,8 @@ __all__ = [
     "MediaReaderNode",
     "AudioTrackSource",
     "VideoTrackSource",
+    # Sink
+    "MediaWriterNode",
     # Text
     "TextProcessorNode",
     # Video
@@ -44,10 +49,15 @@ __all__ = [
     "VideoBuffer",
     "VideoResizer",
     # Transform nodes
-    "DataTransform",
+    "TransformNode",
     # Remote nodes
     "RemoteExecutionNode",
     "RemoteObjectExecutionNode",
     "SerializedClassExecutorNode",
     "StatefulCounter",
+    # ML
+    "WhisperTranscriptionNode",
+    "UltravoxNode",
+    "TransformersPipelineNode",
+    "Qwen2_5OmniNode",
 ] 
