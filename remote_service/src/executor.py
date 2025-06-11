@@ -21,6 +21,12 @@ try:
         CalculatorNode, CodeExecutorNode, TextProcessorNode,
         SerializedClassExecutorNode
     )
+    from remotemedia.nodes.ml import (
+        WhisperTranscriptionNode,
+        UltravoxNode,
+        TransformersPipelineNode,
+        Qwen2_5OmniNode
+    )
     from remotemedia.serialization import JSONSerializer, PickleSerializer
     from remotemedia.core.node import Node
     SDK_AVAILABLE = True
@@ -119,6 +125,16 @@ class TaskExecutor:
                 registry['TextProcessorNode'] = TextProcessorNode
             if SerializedClassExecutorNode:
                 registry['SerializedClassExecutorNode'] = SerializedClassExecutorNode
+            
+            # ML Nodes
+            if WhisperTranscriptionNode:
+                registry['WhisperTranscriptionNode'] = WhisperTranscriptionNode
+            if UltravoxNode:
+                registry['UltravoxNode'] = UltravoxNode
+            if TransformersPipelineNode:
+                registry['TransformersPipelineNode'] = TransformersPipelineNode
+            if Qwen2_5OmniNode:
+                registry['Qwen2_5OmniNode'] = Qwen2_5OmniNode
             
             self.logger.info(f"Registered {len(registry)} SDK nodes")
         else:

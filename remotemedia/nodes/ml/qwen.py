@@ -164,6 +164,10 @@ class Qwen2_5OmniNode(Node):
             return await asyncio.to_thread(_inference_thread)
 
     async def process(self, data_stream: AsyncGenerator[Any, None]) -> AsyncGenerator[Any, None]:
+        # Lazy initialization: ensure the model is loaded before processing.
+        if not self.is_initialized:
+            await self.initialize()
+
         frame_count = 0
         log_interval = 50  # Log buffer status every 50 video frames
 
