@@ -38,7 +38,7 @@ async def test_remote_audio_resampling_pipeline(grpc_server, input_rate, output_
     pipeline.add_node(AudioBuffer(buffer_size_samples=buffer_size))
     pipeline.add_node(RemoteExecutionNode(
         name="RemoteAudioTransform",
-        node_to_execute="AudioTransform",
+        node_class_name="AudioTransform",
         remote_config=remote_config,
         node_config={'output_sample_rate': output_rate, 'output_channels': 1}
     ))

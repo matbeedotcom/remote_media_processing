@@ -18,7 +18,7 @@ from .sink import * # noqa: F401, F403
 from remotemedia.core.node import Node
 from .audio import AudioTransform, AudioBuffer, AudioResampler
 from .text_processor import TextProcessorNode
-from .transform import DataTransform
+from .transform import TransformNode
 from .video import VideoTransform, VideoBuffer, VideoResizer
 from .remote import RemoteExecutionNode, RemoteObjectExecutionNode
 from .serialized_class_executor import SerializedClassExecutorNode
@@ -49,7 +49,7 @@ __all__ = [
     "VideoBuffer",
     "VideoResizer",
     # Transform nodes
-    "DataTransform",
+    "TransformNode",
     # Remote nodes
     "RemoteExecutionNode",
     "RemoteObjectExecutionNode",

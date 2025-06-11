@@ -41,7 +41,7 @@ class Qwen2_5OmniNode(Node):
                  torch_dtype: str = "auto",
                  attn_implementation: Optional[str] = None,
                  conversation_template: Optional[List[Dict[str, Any]]] = None,
-                 buffer_duration_s: float = 5.0,
+                 buffer_duration_s: float = 30.0,
                  video_fps: int = 10,
                  audio_sample_rate: int = 16000,
                  speaker: Optional[str] = None,

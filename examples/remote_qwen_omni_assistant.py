@@ -26,7 +26,7 @@ import os
 import soundfile as sf
 import sys
 from pathlib import Path
-
+import time
 # Ensure the 'remotemedia' package is in the Python path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -85,7 +85,7 @@ async def main():
     
     # The source node reads the video and produces a stream of AV packets
     pipeline.add_node(MediaReaderNode(
-        path="/Users/mathieugosbee/dev/originals/remote_media_processing/examples/BigBuckBunny_320x180-trim.mp4"
+        path="examples/draw.mp4"
     ))
     
     # This node extracts the video frames from the stream
@@ -103,7 +103,7 @@ async def main():
                         logger.info(f"Generated Text Response {i+1}: '{response}'")
 
                 if audio_response is not None and audio_response.size > 0:
-                    output_filename = "remote_qwen_output.wav"
+                    output_filename = f"remote_qwen_output_{time.time()}.wav"
                     await asyncio.to_thread(sf.write, output_filename, audio_response, samplerate=24000)
                     logger.info(f"Generated audio saved to '{os.path.abspath(output_filename)}'")
                 else:

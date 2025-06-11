@@ -39,42 +39,50 @@ class RemoteExecutorConfig:
         """
         Create a remote execution node from this configuration.
 
-        This method acts as a factory. When you call an instance of this class,
-        it will construct and return a specialized remote node wrapper.
+        This method acts as a smart factory. It inspects the `target` argument
+        and returns the appropriate remote node wrapper.
+
+        - If `target` is a string, it returns a `RemoteExecutionNode`, which
+          tells the server to instantiate a node with that class name.
+        - If `target` is a `Node` object instance, it returns a
+          `RemoteObjectExecutionNode`, which serializes the object and sends
+          it to the server for execution.
 
         Example:
             config = RemoteExecutorConfig(host="localhost", port=50051)
             
-            # To run a pre-registered node on the server by its class name:
-            remote_node = config("MyNodeClassName", node_config={"param": "value"})
+            # Use case 1: Run a pre-registered node on the server by its class name.
+            # This creates a RemoteExecutionNode.
+            remote_node = config("WhisperTranscriptionNode", node_config={"model": "large-v3"})
 
-            # To run a local node object on the server:
-            local_obj = MyNodeClass()
-            remote_node = config(local_obj)
+            # Use case 2: Run a local node object on the server.
+            # This creates a RemoteObjectExecutionNode.
+            local_node = MyCustomFilterNode(strength=0.8)
+            remote_node = config(local_node)
 
         Args:
-            target (Union[str, "Node"]): The node class name (str) to be executed
-                remotely, or a local Node instance to be serialized and sent to
-                the server.
-            **kwargs: Additional arguments for the remote node's constructor
-                      (e.g., `node_config` for `RemoteExecutionNode`).
+            target (Union[str, "Node"]): The node to execute remotely. This can be
+                the class name (str) of a node known to the server, or a local
+                Node instance to be serialized and executed.
+            **kwargs: Additional arguments for the remote node's constructor.
+                      For `RemoteExecutionNode`, this can include `node_config`.
 
         Returns:
-            A `RemoteExecutionNode` or `RemoteObjectExecutionNode` instance,
-            configured for remote execution.
+            A `RemoteExecutionNode` or `RemoteObjectExecutionNode` instance.
         """
         # Local import to avoid circular dependencies
         from ..nodes.remote import RemoteExecutionNode, RemoteObjectExecutionNode
 
         if isinstance(target, str):
             return RemoteExecutionNode(
-                node_to_execute=target,
+                node_class_name=target,
                 remote_config=self,
                 **kwargs
             )
         elif isinstance(target, Node):
+            # The object to execute is the target itself
             return RemoteObjectExecutionNode(
-                obj_to_execute=target,
+                node_object=target,
                 remote_config=self,
                 **kwargs
             )

@@ -21,13 +21,13 @@ class RemoteExecutionNode(Node):
     result on to the next local node. This version supports streaming.
     """
 
-    def __init__(self, node_to_execute: str, remote_config: RemoteExecutorConfig, 
+    def __init__(self, node_class_name: str, remote_config: RemoteExecutorConfig, 
                  node_config: Dict[str, Any] = None, serialization_format: str = "pickle", **kwargs):
         """
         Initializes the RemoteExecutionNode.
 
         Args:
-            node_to_execute (str): The class name of the node to execute remotely.
+            node_class_name (str): The class name of the node to execute remotely.
             remote_config (RemoteExecutorConfig): Configuration for the remote connection.
             node_config (Dict[str, Any], optional): The configuration for the remote node itself. Defaults to None.
             serialization_format (str, optional): Serialization format to use. Defaults to "pickle".
@@ -36,7 +36,7 @@ class RemoteExecutionNode(Node):
         if not isinstance(remote_config, RemoteExecutorConfig):
             raise ValueError("remote_config must be a valid RemoteExecutorConfig instance.")
             
-        self.node_to_execute = node_to_execute
+        self.node_class_name = node_class_name
         self.remote_config = remote_config
         self.node_config = node_config or {}
         self.serialization_format = serialization_format
@@ -64,44 +64,44 @@ class RemoteExecutionNode(Node):
         if not self.client or not self.client.stub:
             raise NodeError("Remote client not initialized or connected.")
 
-        logger.debug(f"RemoteExecutionNode '{self.name}': starting stream to remote for node '{self.node_to_execute}'")
+        logger.debug(f"RemoteExecutionNode '{self.name}': starting stream to remote for node '{self.node_class_name}'")
 
         try:
             async for result in self.client.stream_node(
-                node_type=self.node_to_execute,
+                node_type=self.node_class_name,
                 config=self.node_config,
                 input_stream=data_stream,
                 serialization_format=self.serialization_format
             ):
                 yield result
         except Exception as e:
-            logger.error(f"RemoteExecutionNode '{self.name}': Failed to stream remote node '{self.node_to_execute}'. Error: {e}")
+            logger.error(f"RemoteExecutionNode '{self.name}': Failed to stream remote node '{self.node_class_name}'. Error: {e}")
             # The exception will be propagated by the pipeline
             raise
 
     def __repr__(self) -> str:
         """String representation of the node."""
-        return f"{self.__class__.__name__}(name='{self.name}', target='{self.node_to_execute}')"
+        return f"{self.__class__.__name__}(name='{self.name}', target='{self.node_class_name}')"
 
 
 class RemoteObjectExecutionNode(Node):
     """
     A node that executes a cloudpickled Python object on a remote server.
     """
-    def __init__(self, obj_to_execute: Any, remote_config: RemoteExecutorConfig, node_config: Optional[Dict[str, Any]] = None, **kwargs):
+    def __init__(self, node_object: Node, remote_config: RemoteExecutorConfig, node_config: Optional[Dict[str, Any]] = None, **kwargs):
         super().__init__(**kwargs)
-        if not all(hasattr(obj_to_execute, attr) for attr in ['initialize', 'process', 'cleanup']):
-            raise ValueError("The object to execute must have initialize, process, and cleanup methods.")
+        if not all(hasattr(node_object, attr) for attr in ['initialize', 'process', 'cleanup']):
+            raise ValueError("The object to execute must be a valid Node with initialize, process, and cleanup methods.")
             
         if not isinstance(remote_config, RemoteExecutorConfig):
             raise ValueError("remote_config must be a valid RemoteExecutorConfig instance.")
 
-        self.obj_to_execute = obj_to_execute
+        self.node_object = node_object
         self.remote_config = remote_config
         self.node_config = node_config or {}
         self.client: Optional[RemoteExecutionClient] = None
         self.session_id: Optional[str] = None
-        self.is_streaming = getattr(self.obj_to_execute, 'is_streaming', False)
+        self.is_streaming = getattr(self.node_object, 'is_streaming', False)
 
     async def initialize(self):
         """
@@ -137,7 +137,7 @@ class RemoteObjectExecutionNode(Node):
             try:
                 # The stream_object method now handles the initialization and streaming
                 async for result in self.client.stream_object(
-                    obj_to_execute=self.obj_to_execute,
+                    obj_to_execute=self.node_object,
                     config=self.node_config,
                     input_stream=data
                 ):
@@ -150,7 +150,7 @@ class RemoteObjectExecutionNode(Node):
             # This part of the logic needs to be revisited.
             try:
                 result = await self.client.execute_object_method(
-                    obj=self.obj_to_execute,
+                    obj=self.node_object,
                     method_name='process',
                     method_args=[data]
                 )
@@ -161,7 +161,7 @@ class RemoteObjectExecutionNode(Node):
 
     def __repr__(self) -> str:
         """String representation of the node."""
-        target_name = getattr(self.obj_to_execute, 'name', self.obj_to_execute.__class__.__name__)
+        target_name = getattr(self.node_object, 'name', self.node_object.__class__.__name__)
         return f"{self.__class__.__name__}(name='{self.name}', target='{target_name}')"
 
 

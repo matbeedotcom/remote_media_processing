@@ -105,11 +105,18 @@ class DependencyAnalyzer:
         try:
             # Get the source file of the object
             import inspect
-            source_file = inspect.getfile(obj)
+            source_file = inspect.getfile(obj.__class__)
             source_path = Path(source_file).resolve()
             
             if self._is_local_dependency(source_path):
-                return self.analyze_file(source_path)
+                # Analyze the source file for its imports
+                dependencies = self.analyze_file(source_path)
+                # Add the source file itself to the dependencies
+                dependencies.add(source_path)
+                # Add all __init__.py files in the module's path
+                package_inits = self._get_package_inits(source_path)
+                dependencies.update(package_inits)
+                return dependencies
             else:
                 logger.debug(f"Object {obj} is not from a local file: {source_file}")
                 return set()
@@ -117,6 +124,21 @@ class DependencyAnalyzer:
         except (TypeError, OSError) as e:
             logger.debug(f"Could not get source file for object {obj}: {e}")
             return set()
+    
+    def _get_package_inits(self, source_path: Path) -> Set[Path]:
+        """
+        Find all __init__.py files from the source file's directory up to the project root.
+        """
+        inits = set()
+        current_dir = source_path.parent
+        while self.project_root in current_dir.parents or self.project_root == current_dir:
+            init_file = current_dir / "__init__.py"
+            if init_file.exists():
+                inits.add(init_file)
+            if current_dir == self.project_root:
+                break
+            current_dir = current_dir.parent
+        return inits
     
     def _resolve_import_to_file(self, import_path: str, current_dir: Path) -> Optional[Path]:
         """

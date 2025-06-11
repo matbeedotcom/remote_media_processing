@@ -11,11 +11,11 @@ logger = logging.getLogger(__name__)
 
 
 class PassThroughNode(Node):
-    """A node that passes data through without modification."""
-    
-    def process(self, data: Any) -> Any:
-        """Pass data through unchanged."""
-        logger.debug(f"PassThroughNode '{self.name}': passing through data")
+    """
+    A node that simply passes data through without modification.
+    Useful for debugging and testing pipeline connections.
+    """
+    async def process(self, data: Any) -> Any:
         return data
 
 
@@ -55,4 +55,18 @@ class BufferNode(Node):
         return result
 
 
-__all__ = ["PassThroughNode", "BufferNode"] 
+class TakeFirstItem(Node):
+    """
+    A node that takes only the first item from a stream and then ignores the rest.
+    """
+    _produced = False
+    
+    async def process(self, data: Any) -> Any:
+        if not self._produced:
+            self._produced = True
+            return data
+        # Return nothing for subsequent calls
+        return None
+
+
+__all__ = ["PassThroughNode", "BufferNode", "TakeFirstItem"] 

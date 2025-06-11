@@ -17,7 +17,7 @@ try:
         PassThroughNode, BufferNode,
         AudioTransform, AudioBuffer, AudioResampler,
         VideoTransform, VideoBuffer, VideoResizer,
-        DataTransform, FormatConverter,
+        TransformNode, FormatConverter,
         CalculatorNode, CodeExecutorNode, TextProcessorNode,
         SerializedClassExecutorNode
     )
@@ -32,7 +32,7 @@ except ImportError:
     PassThroughNode = BufferNode = None
     AudioTransform = AudioBuffer = AudioResampler = None
     VideoTransform = VideoBuffer = VideoResizer = None
-    DataTransform = FormatConverter = None
+    TransformNode = FormatConverter = None
     CalculatorNode = CodeExecutorNode = TextProcessorNode = None
     SerializedClassExecutorNode = None
     JSONSerializer = PickleSerializer = None
@@ -105,8 +105,8 @@ class TaskExecutor:
                 registry['VideoResizer'] = VideoResizer
             
             # Transform nodes
-            if DataTransform:
-                registry['DataTransform'] = DataTransform
+            if TransformNode:
+                registry['TransformNode'] = TransformNode
             if FormatConverter:
                 registry['FormatConverter'] = FormatConverter
             

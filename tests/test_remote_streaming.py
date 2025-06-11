@@ -22,7 +22,7 @@ async def test_remote_streaming_execution():
     node_config = {"initial_value": 100}
     
     pipeline.add_node(RemoteExecutionNode(
-        node_to_execute="StatefulCounter",
+        node_class_name="StatefulCounter",
         remote_config=remote_config,
         node_config=node_config
     ))

@@ -65,7 +65,7 @@ async def main():
     # node with the specified configuration.
     pipeline.add_node(RemoteExecutionNode(
         name="RemoteResampler",
-        node_to_execute="AudioTransform",
+        node_class_name="AudioTransform",
         remote_config=remote_config,
         node_config={'output_sample_rate': 16000, 'output_channels': 1}
     ))
