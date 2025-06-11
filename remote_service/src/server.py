@@ -226,11 +226,13 @@ class RemoteExecutionServicer(execution_pb2_grpc.RemoteExecutionServiceServicer)
                     "object": obj,
                     "sandbox_path": sandbox_path
                 }
+                self.logger.info(f"remote_service.ExecuteObjectMethod: Object sessions: {self.object_sessions}")
 
                 # Initialize object if it has an initialize method
                 if hasattr(obj, 'initialize') and callable(getattr(obj, 'initialize')):
                     print(f"remote_service.ExecuteObjectMethod: Initializing object {obj} with method {obj.initialize}")
                     await obj.initialize()
+                    self.logger.info(f"remote_service.ExecuteObjectMethod: Object {obj} initialized")
 
             # Deserialize arguments
             serializer = PickleSerializer() if request.serialization_format == 'pickle' else JSONSerializer()
@@ -270,6 +272,7 @@ class RemoteExecutionServicer(execution_pb2_grpc.RemoteExecutionServiceServicer)
         session_id = None
         try:
             # The first message contains the session_id and config
+            self.logger.info(f"remote_service.StreamObject: request_iterator: {request_iterator}")
             init_request = await request_iterator.__anext__()
             self.logger.info(f"remote_service.StreamObject: init_request: {init_request}")
             session_id = init_request.session_id
