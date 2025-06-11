@@ -46,11 +46,24 @@ logger = logging.getLogger(__name__)
 
 
 class PrintResponseStream(Node):
-    """A simple node that prints the streaming text response."""
+    """
+    A sink node that prints the streaming text response in a formatted block.
+    """
+    _started_printing = False
 
     async def process(self, token: str):
+        if not self._started_printing:
+            print("\n--- Model Response ---")
+            self._started_printing = True
+
         if token:
             print(token, end="", flush=True)
+
+    async def cleanup(self) -> None:
+        """Prints a footer after the stream is finished."""
+        if self._started_printing:
+            print("\n----------------------\n")
+        await super().cleanup()
 
 
 async def main():
@@ -106,7 +119,7 @@ async def main():
         async with pipeline.managed_execution():
             async for _ in pipeline.process():
                 pass
-        print() 
+        # The final newline is now handled by the PrintResponseStream's cleanup
         logger.info("Pipeline finished successfully.")
     except Exception as e:
         logger.error(f"An error occurred during pipeline execution: {e}", exc_info=True)
