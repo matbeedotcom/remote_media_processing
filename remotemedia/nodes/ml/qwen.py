@@ -32,44 +32,46 @@ except ImportError:
     Qwen2_5OmniProcessor = None
     process_mm_info = None
 
-class TextQueueStreamer(object):
+class AudioAndTextStreamer:
     """
-    A simple streamer that puts generated text tokens into a queue.
+    A streamer that handles both text and audio chunks, putting them into a
+    queue with identifiers. This allows for true real-time streaming of
+    both text and audio from the model.
     """
-    def __init__(self, tokenizer, q: queue.Queue, skip_prompt: bool = True):
+    def __init__(self, tokenizer, q: queue.Queue):
         self.tokenizer = tokenizer
         self.q = q
-        self.skip_prompt = skip_prompt
-        self.text = ""
+        self.text_buffer = ""
+        self.text_started = False
         self.multibyte_fix = 0
 
     def put(self, value):
-        if len(value.shape) > 1 and value.shape[0] > 1:
-            raise ValueError("TextQueueStreamer only supports batch size 1")
-        elif len(value.shape) > 1:
-            value = value[0]
+        if value.dtype == torch.long: # These are text tokens
+            if not self.text_started:
+                self.text_started = True
+                return
 
-        if self.skip_prompt and self.text == "":
-            return
+            sub_text = self.tokenizer.decode(value, skip_special_tokens=True)
+            if len(sub_text) == 1 and sub_text.isspace():
+                return
+            
+            # Fix for multibyte characters, see https://github.com/huggingface/transformers/pull/28256
+            if len(sub_text) > 1 and sub_text.endswith(""):
+                 self.multibyte_fix += 1
+                 return
+            if self.multibyte_fix > 0:
+                 sub_text = "" * self.multibyte_fix + sub_text
+                 self.multibyte_fix = 0
 
-        # Adapted from transformers.TextStreamer to handle token-by-token decoding
-        sub_text = self.tokenizer.decode(value, skip_special_tokens=True)
-        if len(sub_text) == 1 and sub_text.isspace(): # Don't yield single spaces
-            return
-        
-        # multibyte-fix, see https://github.com/huggingface/transformers/pull/28256
-        if len(sub_text) > 1 and sub_text.endswith(""):
-             self.multibyte_fix += 1
-             return
-        if self.multibyte_fix > 0:
-             sub_text = "" * self.multibyte_fix + sub_text
-             self.multibyte_fix = 0
-
-        self.text += sub_text
-        self.q.put(sub_text)
+            self.text_buffer += sub_text
+            self.q.put(("text", sub_text))
+            
+        elif value.dtype == torch.float: # This is an audio chunk
+            audio_chunk = value.cpu().numpy()
+            self.q.put(("audio", audio_chunk))
 
     def end(self):
-        self.q.put(_SENTINEL)
+        self.q.put(("end", None))
 
 class Qwen2_5OmniNode(Node):
     """
@@ -202,20 +204,18 @@ class Qwen2_5OmniNode(Node):
                 generate_kwargs["speaker"] = self.speaker
             
             q = queue.Queue()
-            streamer = TextQueueStreamer(self.processor.tokenizer, q)
+            streamer = AudioAndTextStreamer(self.processor.tokenizer, q)
 
             def generation_thread():
                 try:
                     self.logger.info("Generation thread started.")
-                    _, audio_tensor = self.model.generate(**inputs, streamer=streamer, **generate_kwargs)
-                    if audio_tensor is not None and audio_tensor.numel() > 0:
-                        audio_np = audio_tensor.reshape(-1).detach().cpu().numpy()
-                        q.put(audio_np)
-                        self.logger.info("Audio tensor placed in queue.")
+                    # When using a streamer, the generate function does not return values.
+                    # All output is routed through the streamer.
+                    self.model.generate(**inputs, streamer=streamer, **generate_kwargs)
                 except Exception as e:
                     self.logger.error(f"Error in generation thread: {e}", exc_info=True)
                 finally:
-                    # End signal is put by the streamer's `end` method
+                    # The streamer's `end` method is responsible for signaling completion.
                     pass
 
             thread = Thread(target=generation_thread)
@@ -223,17 +223,14 @@ class Qwen2_5OmniNode(Node):
             
             self.logger.info("Polling queue for streaming results...")
             while True:
-                try:
-                    item = await asyncio.to_thread(q.get)
-                    if item is _SENTINEL:
-                        self.logger.info("End-of-stream signal received.")
-                        break
-                    yield item
-                except queue.Empty:
-                    if not thread.is_alive():
-                        break
-                    await asyncio.sleep(0.01)
-            
+                item_type, content = await asyncio.to_thread(q.get)
+                
+                if item_type == "end":
+                    self.logger.info("End-of-stream signal received.")
+                    break
+                
+                yield (item_type, content)
+
             thread.join()
             self.logger.info("Generation thread joined.")
 
@@ -256,15 +253,15 @@ class Qwen2_5OmniNode(Node):
 
             if len(self.video_buffer) >= self.video_buffer_max_frames:
                 self.logger.info(f"Buffer full ({len(self.video_buffer)} frames). Running inference...")
-                async for chunk in self._run_inference():
-                    yield chunk
+                async for item in self._run_inference():
+                    yield item
                 self.video_buffer.clear()
                 self.audio_buffer.clear()
         
         if self.video_buffer or self.audio_buffer:
             self.logger.info(f"Processing final buffer segment at end of stream ({len(self.video_buffer)} video frames, {len(self.audio_buffer)} audio chunks).")
-            async for chunk in self._run_inference():
-                yield chunk
+            async for item in self._run_inference():
+                yield item
             self.video_buffer.clear()
             self.audio_buffer.clear()
 
