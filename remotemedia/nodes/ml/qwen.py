@@ -158,7 +158,14 @@ class Qwen2_5OmniNode(Node):
             return await asyncio.to_thread(_inference_thread)
 
     async def process(self, data_stream: AsyncGenerator[Any, None]) -> AsyncGenerator[Any, None]:
-        async for data, _ in data_stream:
+        async for item in data_stream:
+            # Defensive unpacking with logging to debug the stream format
+            if not isinstance(item, tuple) or len(item) != 2:
+                self.logger.warning(f"Qwen node received item of unexpected format, skipping. Got {type(item)} with len {len(item) if hasattr(item, '__len__') else 'N/A'}")
+                continue
+            
+            data, _ = item
+
             if isinstance(data, av.VideoFrame):
                 self.video_buffer.append(data.to_ndarray(format='rgb24'))
             elif isinstance(data, av.AudioFrame):
