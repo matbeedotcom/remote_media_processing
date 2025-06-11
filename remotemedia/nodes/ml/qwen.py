@@ -69,7 +69,9 @@ class TextQueueStreamer(object):
         self.q.put(sub_text)
 
     def end(self):
-        self.q.put(_SENTINEL)
+        # This is called when text generation is done, but we need to wait for audio.
+        # The sentinel will be put by the generation thread itself.
+        pass
 
 class Qwen2_5OmniNode(Node):
     """
@@ -215,8 +217,8 @@ class Qwen2_5OmniNode(Node):
                 except Exception as e:
                     self.logger.error(f"Error in generation thread: {e}", exc_info=True)
                 finally:
-                    # End signal is put by the streamer's `end` method
-                    pass
+                    # Signal that the entire generation process (text and audio) is complete.
+                    q.put(_SENTINEL)
 
             thread = Thread(target=generation_thread)
             thread.start()
