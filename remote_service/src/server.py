@@ -18,6 +18,7 @@ from typing import Dict, Any, AsyncIterable, AsyncGenerator
 import inspect
 from concurrent.futures import ThreadPoolExecutor
 import uuid
+import ast
 
 import grpc
 from grpc_health.v1 import health_pb2_grpc
@@ -386,15 +387,11 @@ class RemoteExecutionServicer(execution_pb2_grpc.RemoteExecutionServiceServicer)
             config = {}
             for k, v in init_request.config.items():
                 try:
-                    config[k] = int(v)
-                except ValueError:
-                    try:
-                        config[k] = float(v)
-                    except ValueError:
-                        if v.lower() in ['true', 'false']:
-                            config[k] = v.lower() == 'true'
-                        else:
-                            config[k] = v
+                    # Safely evaluate literals like lists, dicts, booleans, numbers
+                    config[k] = ast.literal_eval(v)
+                except (ValueError, SyntaxError):
+                    # Keep it as a string if it's not a literal
+                    config[k] = v
 
             serialization_format = init_request.serialization_format
 

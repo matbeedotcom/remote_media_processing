@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Example of using the RemoteExecutionNode to stream video to a Qwen2.5-Omni
-assistant on a remote server and get a response.
+Example of using the RemoteObjectExecutionNode to stream video to a
+Qwen2.5-Omni assistant on a remote server and get a response.
 
-This demonstrates how a standard, pre-registered node can be executed
-remotely within a pipeline by specifying its type and configuration.
+This demonstrates how a custom-configured, streaming-capable node can be executed
+remotely within a pipeline.
 
 **TO RUN THIS EXAMPLE:**
 
@@ -33,6 +33,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from remotemedia.core.node import RemoteExecutorConfig
 from remotemedia.core.pipeline import Pipeline
 from remotemedia.nodes.source import MediaReaderNode
+from remotemedia.nodes.ml import Qwen2_5OmniNode
+from remotemedia.nodes.remote import RemoteObjectExecutionNode
+
 
 # Configure basic logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -63,21 +66,20 @@ async def main():
         },
     ]
 
-    # 1. Configure the remote execution.
-    #    This config will be used to wrap the remote node.
-    remote_config = RemoteExecutorConfig(host=REMOTE_HOST, port=50051)
-
-    # 2. Define the configuration for the remote node.
-    #    This dictionary will be sent to the server to initialize the Qwen2_5OmniNode.
-    qwen_node_config = {
-        "name": "RemoteQwenAssistant",
-        "model_id": "Qwen/Qwen2.5-Omni-3B",
-        "device": "cuda",
-        "torch_dtype": "bfloat16",
-        "conversation_template": conversation_template,
-        "buffer_duration_s": 5.0,
-        "speaker": "Ethan"
-    }
+    # 1. Create a local instance of the node with its configuration.
+    #    This object will be serialized and sent to the server for execution.
+    local_qwen_instance = Qwen2_5OmniNode(
+        name="RemoteQwenAssistant",
+        model_id="Qwen/Qwen2.5-Omni-3B",
+        device="cuda",
+        torch_dtype="bfloat16",
+        conversation_template=conversation_template,
+        buffer_duration_s=5.0,
+        speaker="Ethan"
+    )
+    
+    # 2. Configure the remote execution wrapper.
+    remote_config = RemoteExecutorConfig(host=REMOTE_HOST, port=50052, ssl_enabled=False)
     
     # 3. Set up the pipeline
     pipeline = Pipeline()
@@ -87,11 +89,11 @@ async def main():
         path="https://qianwen-res.oss-cn-beijing.aliyuncs.com/Qwen2.5-Omni/draw.mp4"
     ))
     
-    # Use the remote_config as a factory to create a RemoteExecutionNode.
-    # This node will ask the server to run a "Qwen2_5OmniNode" with the specified config.
-    pipeline.add_node(remote_config(
-        "Qwen2_5OmniNode",
-        node_config=qwen_node_config
+    # The RemoteObjectExecutionNode sends the local_qwen_instance to the server
+    # and streams the data from the previous node to it.
+    pipeline.add_node(RemoteObjectExecutionNode(
+        obj_to_execute=local_qwen_instance,
+        remote_config=remote_config
     ))
 
     try:

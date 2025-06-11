@@ -43,7 +43,7 @@ class RemoteExecutorConfig:
         it will construct and return a specialized remote node wrapper.
 
         Example:
-            config = RemoteExecutorConfig(host="localhost", port=50051)
+            config = RemoteExecutorConfig(host="localhost", port=50052)
             
             # To run a pre-registered node on the server by its class name:
             remote_node = config("MyNodeClassName", node_config={"param": "value"})
