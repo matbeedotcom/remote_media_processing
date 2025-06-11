@@ -240,8 +240,9 @@ class LocalMediaReaderNode(Node):
                     yield {'video': frame}
                 elif isinstance(frame, av.AudioFrame):
                     yield {'audio': frame}
-            # Cede control to the event loop to allow downstream processing
-            await asyncio.sleep(0)
+            # Cede control to the event loop to allow downstream processing.
+            # A non-zero sleep is crucial for network-bound downstream nodes.
+            await asyncio.sleep(0.001)
         logger.info(f"Finished streaming from '{self.path}'")
 
 
