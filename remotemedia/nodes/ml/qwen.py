@@ -51,8 +51,14 @@ class AudioAndTextStreamer:
                 self.text_started = True
                 return
 
+            # Ensure value is a list of integers, not a tensor, for the decoder
+            if hasattr(value, 'tolist'):
+                token_ids = value.tolist()
+            else:
+                token_ids = value
+
             # The value is a tensor of token IDs. We decode it to get the string.
-            sub_text = self.tokenizer.decode(value, skip_special_tokens=True)
+            sub_text = self.tokenizer.decode(token_ids, skip_special_tokens=True)
             
             # Handle multibyte characters and whitespace
             if len(sub_text) == 1 and sub_text.isspace():
