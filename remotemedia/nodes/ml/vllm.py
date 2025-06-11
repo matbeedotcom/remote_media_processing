@@ -3,6 +3,11 @@ import logging
 import time
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
+try:
+    from transformers import AutoTokenizer
+except ImportError:
+    AutoTokenizer = None
+
 from remotemedia.core.exceptions import NodeError
 from remotemedia.core.node import Node
 
@@ -30,9 +35,10 @@ class VLLMNode(Node):
         self,
         # --- Node-specific arguments ---
         model: str,
-        prompt_template: str,
+        prompt_template: Optional[str] = None,
         modalities: Optional[List[str]] = None,
         sampling_params: Optional[Dict[str, Any]] = None,
+        use_chat_template: bool = False,
         
         # --- Common vLLM Engine arguments (mirrored from vllm.LLM) ---
         tokenizer: Optional[str] = None,
@@ -56,10 +62,14 @@ class VLLMNode(Node):
             model: The ID of the model to load from HuggingFace.
             prompt_template: A string template for the prompt, with placeholders
                            for data from the input stream (e.g., "{text}").
-                           It should also include multimodal placeholders like
-                           "<image>" if modalities are used.
+                           Used when `use_chat_template` is False.
             modalities: A list of modalities the model expects (e.g., ["image"]).
             sampling_params: A dictionary of parameters for vLLM's SamplingParams.
+                           Can include 'stop_tokens' as a list of strings, which
+                           will be converted to token IDs if using a chat template.
+            use_chat_template: If True, uses the model's tokenizer to apply a
+                               chat template to the input. The input data to this
+                               node's `process` method should contain a 'messages' key.
             
             tokenizer: The name or path of the tokenizer to use.
             tokenizer_mode: The mode of the tokenizer ('auto', 'slow', or 'fast').
@@ -79,8 +89,14 @@ class VLLMNode(Node):
         node_name = engine_kwargs.pop('name', None)
         super().__init__(name=node_name)
 
-        self.is_streaming = True
+        if use_chat_template and prompt_template:
+            logger.warning("'prompt_template' is ignored when 'use_chat_template' is True.")
+            prompt_template = None
+        if not use_chat_template and not prompt_template:
+            raise ValueError("Either 'prompt_template' must be provided or 'use_chat_template' must be True.")
 
+        self.is_streaming = True
+        self.use_chat_template = use_chat_template
         self.prompt_template = prompt_template
         self.modalities = modalities or []
 
@@ -102,36 +118,51 @@ class VLLMNode(Node):
         # Filter out None values so we don't pass them if they are not set
         self._engine_args = {k: v for k, v in self._engine_args.items() if v is not None}
 
-        self._sampling_params = {
+        self._sampling_params_dict = {
             "temperature": 0.7,
             "max_tokens": 512,
         }
         if sampling_params:
-            self._sampling_params.update(sampling_params)
+            self._sampling_params_dict.update(sampling_params)
 
         self.engine: Optional[AsyncLLMEngine] = None
+        self.tokenizer: Optional[AutoTokenizer] = None
         self.sampling_params_obj: Optional[SamplingParams] = None
 
     async def initialize(self) -> None:
-        """Initializes the vLLM engine."""
+        """Initializes the vLLM engine and, if needed, the tokenizer."""
         await super().initialize()
         if not AsyncLLMEngine:
             raise NodeError("vLLM is not installed. Please install with 'pip install vllm'.")
+        if self.use_chat_template and not AutoTokenizer:
+            raise NodeError("transformers is not installed. Please install with 'pip install transformers'.")
 
         logger.info(f"Initializing vLLM engine for model '{self._engine_args['model']}'...")
         try:
+            # Initialize tokenizer first if needed for chat templates
+            if self.use_chat_template:
+                self.tokenizer = await asyncio.to_thread(
+                    AutoTokenizer.from_pretrained,
+                    self._engine_args.get("tokenizer", self._engine_args["model"]),
+                    trust_remote_code=self._engine_args.get("trust_remote_code", True)
+                )
+
+            # Convert stop words to tokens if necessary
+            if self.tokenizer and 'stop_tokens' in self._sampling_params_dict:
+                stop_tokens = self._sampling_params_dict.pop('stop_tokens')
+                self._sampling_params_dict['stop_token_ids'] = await asyncio.to_thread(
+                    self.tokenizer.convert_tokens_to_ids, stop_tokens
+                )
+
             engine_args_obj = AsyncEngineArgs(**self._engine_args)
-            # The from_engine_args method is synchronous and can block the event
-            # loop while it initializes the engine and its workers.
-            # Running it in a separate thread prevents blocking and helps with
-            # CUDA context initialization in multiprocess environments.
             self.engine = await asyncio.to_thread(
                 AsyncLLMEngine.from_engine_args, engine_args_obj
             )
-            self.sampling_params_obj = SamplingParams(**self._sampling_params)
+            
+            self.sampling_params_obj = SamplingParams(**self._sampling_params_dict)
             logger.info("vLLM engine initialized successfully.")
         except Exception as e:
-            raise NodeError(f"Failed to initialize vLLM engine: {e}") from e
+            raise NodeError(f"Failed to initialize VLLMNode: {e}") from e
 
     async def process(
         self, data_stream: AsyncGenerator[Any, None]
@@ -149,28 +180,35 @@ class VLLMNode(Node):
                     f"VLLMNode expects dictionary input, but got {type(data)}. Skipping."
                 )
                 continue
-
-            try:
-                prompt = self.prompt_template.format(**data)
-            except KeyError as e:
-                logger.warning(
-                    f"Missing key {e} in input data for prompt template. Skipping."
+            
+            prompt_text = None
+            if self.use_chat_template:
+                if 'messages' not in data:
+                    logger.warning("VLLMNode in chat mode requires a 'messages' key in input data. Skipping.")
+                    continue
+                prompt_text = self.tokenizer.apply_chat_template(
+                    data['messages'],
+                    tokenize=False,
+                    add_generation_prompt=True
                 )
+            else:
+                 try:
+                    prompt_text = self.prompt_template.format(**data)
+                 except KeyError as e:
+                    logger.warning(
+                        f"Missing key {e} in input data for prompt template. Skipping."
+                    )
+                    continue
+
+            if not prompt_text:
                 continue
 
             multi_modal_data = {}
             for modality in self.modalities:
                 if modality in data:
                     multi_modal_data[modality] = data[modality]
-                else:
-                    logger.warning(
-                        f"Modality '{modality}' specified but not found in "
-                        "input data. It will be omitted."
-                    )
-
-            # For AsyncLLMEngine, multimodal data is passed as part of a
-            # dictionary to the 'prompt' argument.
-            llm_inputs = {"prompt": prompt}
+            
+            llm_inputs = {"prompt": prompt_text}
             if multi_modal_data:
                 llm_inputs["multi_modal_data"] = multi_modal_data
 
@@ -193,5 +231,6 @@ class VLLMNode(Node):
     async def cleanup(self) -> None:
         """Cleans up the node's resources."""
         self.engine = None
+        self.tokenizer = None
         self.sampling_params_obj = None
         logger.info("VLLMNode cleaned up.") 
