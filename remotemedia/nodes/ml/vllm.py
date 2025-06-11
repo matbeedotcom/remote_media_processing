@@ -80,7 +80,13 @@ class VLLMNode(Node):
         logger.info(f"Initializing vLLM engine for model '{self.model_id}'...")
         try:
             engine_args_obj = AsyncEngineArgs(**self._engine_args)
-            self.engine = AsyncLLMEngine.from_engine_args(engine_args_obj)
+            # The from_engine_args method is synchronous and can block the event
+            # loop while it initializes the engine and its workers.
+            # Running it in a separate thread prevents blocking and helps with
+            # CUDA context initialization in multiprocess environments.
+            self.engine = await asyncio.to_thread(
+                AsyncLLMEngine.from_engine_args, engine_args_obj
+            )
             self.sampling_params_obj = SamplingParams(**self._sampling_params)
             logger.info("vLLM engine initialized successfully.")
         except Exception as e:
