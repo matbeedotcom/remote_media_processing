@@ -26,6 +26,7 @@ import os
 import soundfile as sf
 import sys
 from pathlib import Path
+import numpy as np
 
 # Ensure the 'remotemedia' package is in the Python path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -97,17 +98,27 @@ async def main():
     try:
         logger.info("Starting remote Qwen pipeline...")
         async with pipeline.managed_execution():
-            async for text_responses, audio_response in pipeline.process():
-                if text_responses:
-                    for i, response in enumerate(text_responses):
-                        logger.info(f"Generated Text Response {i+1}: '{response}'")
+            text_response = ""
+            audio_response = None
+            
+            logger.info("--- Assistant's Response ---")
+            async for chunk in pipeline.process():
+                if isinstance(chunk, str):
+                    # It's a text token, print it to the console in real-time
+                    print(chunk, end="", flush=True)
+                    text_response += chunk
+                elif isinstance(chunk, np.ndarray):
+                    # It's the final audio array
+                    audio_response = chunk
+            
+            print("\n--------------------------") # Newline after text stream
 
-                if audio_response is not None and audio_response.size > 0:
-                    output_filename = "remote_qwen_output.wav"
-                    await asyncio.to_thread(sf.write, output_filename, audio_response, samplerate=24000)
-                    logger.info(f"Generated audio saved to '{os.path.abspath(output_filename)}'")
-                else:
-                    logger.info("No audio was generated for this response.")
+            if audio_response is not None and audio_response.size > 0:
+                output_filename = "remote_qwen_output.wav"
+                await asyncio.to_thread(sf.write, output_filename, audio_response, samplerate=24000)
+                logger.info(f"Generated audio saved to '{os.path.abspath(output_filename)}'")
+            else:
+                logger.info("No audio was generated for this response.")
 
     except Exception as e:
         logger.error(f"An error occurred: {e}", exc_info=True)

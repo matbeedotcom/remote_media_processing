@@ -8,9 +8,12 @@ import requests
 import copy
 import soundfile as sf
 import librosa
+import queue
+from threading import Thread
 
 from remotemedia.core.node import Node
 from remotemedia.core.exceptions import NodeError, ConfigurationError
+from remotemedia.core.types import _SENTINEL
 
 # Configure basic logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -29,6 +32,45 @@ except ImportError:
     Qwen2_5OmniProcessor = None
     process_mm_info = None
 
+class TextQueueStreamer(object):
+    """
+    A simple streamer that puts generated text tokens into a queue.
+    """
+    def __init__(self, tokenizer, q: queue.Queue, skip_prompt: bool = True):
+        self.tokenizer = tokenizer
+        self.q = q
+        self.skip_prompt = skip_prompt
+        self.text = ""
+        self.multibyte_fix = 0
+
+    def put(self, value):
+        if len(value.shape) > 1 and value.shape[0] > 1:
+            raise ValueError("TextQueueStreamer only supports batch size 1")
+        elif len(value.shape) > 1:
+            value = value[0]
+
+        if self.skip_prompt and self.text == "":
+            return
+
+        # Adapted from transformers.TextStreamer to handle token-by-token decoding
+        sub_text = self.tokenizer.decode(value, skip_special_tokens=True)
+        if len(sub_text) == 1 and sub_text.isspace(): # Don't yield single spaces
+            return
+        
+        # multibyte-fix, see https://github.com/huggingface/transformers/pull/28256
+        if len(sub_text) > 1 and sub_text.endswith(""):
+             self.multibyte_fix += 1
+             return
+        if self.multibyte_fix > 0:
+             sub_text = "" * self.multibyte_fix + sub_text
+             self.multibyte_fix = 0
+
+        self.text += sub_text
+        self.q.put(sub_text)
+
+    def end(self):
+        self.q.put(_SENTINEL)
+
 class Qwen2_5OmniNode(Node):
     """
     A node that uses the Qwen2.5-Omni model for multimodal generation from a stream.
@@ -45,7 +87,7 @@ class Qwen2_5OmniNode(Node):
                  video_fps: int = 10,
                  audio_sample_rate: int = 16000,
                  speaker: Optional[str] = None,
-                 use_audio_in_video: bool = False,
+                 use_audio_in_video: bool = True,
                  **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.is_streaming = True
@@ -122,77 +164,89 @@ class Qwen2_5OmniNode(Node):
         except Exception as e:
             raise NodeError(f"Failed to initialize Qwen2.5-Omni model: {e}")
 
-    async def _run_inference(self) -> Optional[Tuple[List[str], Optional[np.ndarray]]]:
+    async def _run_inference(self) -> AsyncGenerator[Any, None]:
         if not self.video_buffer and not self.audio_buffer:
-            return None
+            return
         
         with tempfile.TemporaryDirectory() as temp_dir:
             final_conversation = copy.deepcopy(self.conversation_template)
             video_path, audio_path = None, None
             
-            # Save buffered video to a temporary file
             if self.video_buffer:
                 video_path = await self._save_video_buffer(temp_dir)
 
-            # Save buffered audio to a temporary file
             if self.audio_buffer:
                 audio_path = await self._save_audio_buffer(temp_dir)
             
-            # This node's purpose is to add media from the stream to the conversation.
-            # So, we'll inject the paths we just created.
             self._inject_media_paths(final_conversation, video_path, audio_path)
 
-            # If this node buffered and injected its own audio, we must tell the model
-            # to use it, overriding the initial `use_audio_in_video` setting.
             use_audio_in_video_flag = self.use_audio_in_video
             if audio_path:
                 use_audio_in_video_flag = False
 
-            def _inference_thread():
-                text = self.processor.apply_chat_template(final_conversation, add_generation_prompt=True, tokenize=False)
-                
-                self.logger.info(f"Running inference with use_audio_in_video={use_audio_in_video_flag}")
-                audios, images, videos = process_mm_info(final_conversation, use_audio_in_video=use_audio_in_video_flag)
-                
-                inputs = self.processor(text=text, audio=audios, images=images, videos=videos, return_tensors="pt", padding=True, use_audio_in_video=use_audio_in_video_flag)
-                inputs = inputs.to(self.model.device)
-                if self.torch_dtype != 'auto':
-                    inputs = inputs.to(self.torch_dtype)
+            text = self.processor.apply_chat_template(final_conversation, add_generation_prompt=True, tokenize=False)
+            
+            self.logger.info(f"Preparing inputs with use_audio_in_video={use_audio_in_video_flag}")
+            audios, images, videos = process_mm_info(final_conversation, use_audio_in_video=use_audio_in_video_flag)
+            
+            inputs = self.processor(text=text, audio=audios, images=images, videos=videos, return_tensors="pt", padding=True, use_audio_in_video=use_audio_in_video_flag)
+            inputs = inputs.to(self.model.device)
+            if self.torch_dtype != 'auto':
+                inputs = inputs.to(self.torch_dtype)
 
-                # The processor may pass through its own kwargs which are not
-                # recognized by the model's generate method. We remove them here
-                # to avoid "Unused or unrecognized kwargs" warnings.
-                inputs.pop("images", None)
-                inputs.pop("return_tensors", None)
+            inputs.pop("images", None)
+            inputs.pop("return_tensors", None)
 
-                generate_kwargs = {}
-                if self.speaker:
-                    generate_kwargs["speaker"] = self.speaker
+            generate_kwargs = {}
+            if self.speaker:
+                generate_kwargs["speaker"] = self.speaker
+            
+            q = queue.Queue()
+            streamer = TextQueueStreamer(self.processor.tokenizer, q)
 
-                text_ids, audio_tensor = self.model.generate(**inputs, **generate_kwargs)
-                
-                decoded_text = self.processor.batch_decode(text_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False)
-                audio_np = audio_tensor.reshape(-1).detach().cpu().numpy() if audio_tensor is not None and audio_tensor.numel() > 0 else None
-                return decoded_text, audio_np
+            def generation_thread():
+                try:
+                    self.logger.info("Generation thread started.")
+                    _, audio_tensor = self.model.generate(**inputs, streamer=streamer, **generate_kwargs)
+                    if audio_tensor is not None and audio_tensor.numel() > 0:
+                        audio_np = audio_tensor.reshape(-1).detach().cpu().numpy()
+                        q.put(audio_np)
+                        self.logger.info("Audio tensor placed in queue.")
+                except Exception as e:
+                    self.logger.error(f"Error in generation thread: {e}", exc_info=True)
+                finally:
+                    # End signal is put by the streamer's `end` method
+                    pass
 
-            return await asyncio.to_thread(_inference_thread)
+            thread = Thread(target=generation_thread)
+            thread.start()
+            
+            self.logger.info("Polling queue for streaming results...")
+            while True:
+                try:
+                    item = await asyncio.to_thread(q.get)
+                    if item is _SENTINEL:
+                        self.logger.info("End-of-stream signal received.")
+                        break
+                    yield item
+                except queue.Empty:
+                    if not thread.is_alive():
+                        break
+                    await asyncio.sleep(0.01)
+            
+            thread.join()
+            self.logger.info("Generation thread joined.")
 
     async def process(self, data_stream: AsyncGenerator[Any, None]) -> AsyncGenerator[Any, None]:
         self.logger.info("Qwen process method started.")
         async for data in data_stream:
-            # When data is serialized and sent over the network, complex objects like
-            # av.VideoFrame can be converted to their underlying numpy array representation.
-            # We need to handle both the direct object (for local runs) and the raw
-            # array (for remote runs).
             if isinstance(data, av.VideoFrame):
                 self.video_buffer.append(data.to_ndarray(format='rgb24'))
             elif isinstance(data, np.ndarray):
-                # This is the likely type for video frames after network serialization
                 self.video_buffer.append(data)
             elif isinstance(data, av.AudioFrame):
-                # Audio frames should be handled correctly now
                 resampled_chunk = librosa.resample(
-                    data.to_ndarray().astype(np.float32).mean(axis=0),  # aac is stereo
+                    data.to_ndarray().astype(np.float32).mean(axis=0),
                     orig_sr=data.sample_rate,
                     target_sr=self.audio_sample_rate
                 )
@@ -202,18 +256,15 @@ class Qwen2_5OmniNode(Node):
 
             if len(self.video_buffer) >= self.video_buffer_max_frames:
                 self.logger.info(f"Buffer full ({len(self.video_buffer)} frames). Running inference...")
-                result = await self._run_inference()
-                if result:
-                    yield result
+                async for chunk in self._run_inference():
+                    yield chunk
                 self.video_buffer.clear()
                 self.audio_buffer.clear()
         
-        # After the stream is exhausted, process any remaining buffered data.
         if self.video_buffer or self.audio_buffer:
             self.logger.info(f"Processing final buffer segment at end of stream ({len(self.video_buffer)} video frames, {len(self.audio_buffer)} audio chunks).")
-            result = await self._run_inference()
-            if result:
-                yield result
+            async for chunk in self._run_inference():
+                yield chunk
             self.video_buffer.clear()
             self.audio_buffer.clear()
 
