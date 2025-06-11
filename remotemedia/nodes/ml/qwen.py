@@ -45,7 +45,7 @@ class Qwen2_5OmniNode(Node):
                  video_fps: int = 10,
                  audio_sample_rate: int = 16000,
                  speaker: Optional[str] = None,
-                 use_audio_in_video: bool = False,
+                 use_audio_in_video: bool = True,
                  **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.is_streaming = True
@@ -158,6 +158,12 @@ class Qwen2_5OmniNode(Node):
                 inputs = inputs.to(self.model.device)
                 if self.torch_dtype != 'auto':
                     inputs = inputs.to(self.torch_dtype)
+
+                # The processor may pass through its own kwargs which are not
+                # recognized by the model's generate method. We remove them here
+                # to avoid "Unused or unrecognized kwargs" warnings.
+                inputs.pop("images", None)
+                inputs.pop("return_tensors", None)
 
                 generate_kwargs = {"use_audio_in_video": use_audio_in_video_flag}
                 if self.speaker:

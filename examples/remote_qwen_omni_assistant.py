@@ -53,7 +53,7 @@ async def main():
     conversation_template = [
         {
             "role": "system",
-            "content": [{"type": "text", "text": "You are Qwen, a virtual human developed by the Qwen Team, Alibaba Group."}],
+            "content": [{"type": "text", "text": "You are Qwen, a virtual human developed by the Qwen Team, Alibaba Group, capable of perceiving auditory and visual inputs, as well as generating text and speech."}],
         },
         {
             "role": "user",
