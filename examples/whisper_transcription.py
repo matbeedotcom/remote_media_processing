@@ -15,21 +15,21 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from remotemedia.core.pipeline import Pipeline
-from remotemedia.nodes.source import MediaReaderNode
-from remotemedia.nodes.audio import AudioResampler
+from remotemedia.nodes.source import MediaReaderNode, AudioTrackSource
+from remotemedia.nodes.audio import AudioTransform
 from remotemedia.nodes.ml import WhisperTranscriptionNode
-from remotemedia.nodes.transform import PassThrough
+from remotemedia.nodes import PassThroughNode
 
 # Configure basic logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 
-class PrintNode(PassThrough):
+class PrintNode(PassThroughNode):
     """A simple node that prints any data it receives."""
-    async def process(self, data_stream):
-        async for data in data_stream:
-            print(f"TRANSCRIPTION: {data[0]}")
-            yield data
+    async def process(self, data):
+        # The data from the remote whisper node is a tuple, e.g., ('some text',)
+        print(f"REMOTE TRANSCRIPTION: {data[0]}")
+        yield data
 
 
 async def create_dummy_audio_file(filepath: str, duration_s: int = 10, sample_rate: int = 44100):
@@ -49,17 +49,17 @@ async def main():
     Main function to set up and run the transcription pipeline.
     """
     # 1. Create a dummy audio file for the example
-    dummy_audio_path = "sample_audio.wav"
-    await create_dummy_audio_file(dummy_audio_path)
+    dummy_audio_path = "examples/transcribe_demo.wav"
 
     # 2. Create and configure the pipeline
     pipeline = Pipeline()
 
     # The MediaReaderNode will provide the initial stream of audio chunks
-    pipeline.add_node(MediaReaderNode(path="examples/BigBuckBunny_320x180.mp4", chunk_size=4096))
-
+    pipeline.add_node(MediaReaderNode(path=dummy_audio_path, chunk_size=4096))
+    # Convert av.AudioFrame objects into (ndarray, sample_rate) tuples
+    pipeline.add_node(AudioTrackSource())
     # Whisper expects 16kHz audio, so we resample it.
-    pipeline.add_node(AudioResampler(target_sample_rate=16000))
+    pipeline.add_node(AudioTransform(output_sample_rate=16000, output_channels=1))
 
     # Add the Whisper node to perform transcription
     pipeline.add_node(WhisperTranscriptionNode())
@@ -75,7 +75,6 @@ async def main():
             pass
 
     logging.info("Transcription pipeline finished.")
-    os.remove(dummy_audio_path)
 
 
 if __name__ == "__main__":
