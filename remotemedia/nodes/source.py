@@ -219,8 +219,11 @@ class LocalMediaReaderNode(Node):
         self._queue = asyncio.Queue(maxsize=100)
         self._producer_task = None
 
-    async def _produce_frames(self):
-        """Internal task to read the file and put frames onto the queue."""
+    async def _produce_frames_blocking(self):
+        """
+        Internal method that runs in a separate thread to read the file
+        and put frames onto the queue, without blocking the main event loop.
+        """
         try:
             import av
             container = av.open(self.path)
@@ -234,32 +237,49 @@ class LocalMediaReaderNode(Node):
             logger.info(f"Producer starting to stream from '{self.path}'...")
             for packet in container.demux(video=0 if video_stream else (), audio=0 if audio_stream else ()):
                 for frame in packet.decode():
+                    item = None
                     if isinstance(frame, av.VideoFrame):
-                        await self._queue.put({'video': frame})
+                        item = {'video': frame}
                     elif isinstance(frame, av.AudioFrame):
-                        await self._queue.put({'audio': frame})
+                        item = {'audio': frame}
+                    
+                    if item:
+                        # This is a thread-safe way to put items into an asyncio queue
+                        asyncio.run_coroutine_threadsafe(self._queue.put(item), asyncio.get_running_loop()).result()
+
             logger.info("Producer finished streaming file.")
         except Exception as e:
             logger.error(f"Error in media file producer: {e}", exc_info=True)
         finally:
-            await self._queue.put(None) # Sentinel to signal the end
+            asyncio.run_coroutine_threadsafe(self._queue.put(None), asyncio.get_running_loop()).result() # Sentinel
+
+    async def initialize(self):
+        """Start the producer task in a thread."""
+        await super().initialize()
+        loop = asyncio.get_running_loop()
+        self._producer_task = loop.run_in_executor(
+            None, # Use default ThreadPoolExecutor
+            self._produce_frames_blocking
+        )
 
     async def process(self, data: Any = None) -> AsyncGenerator[Any, None]:
         """Yields frames from the internal queue."""
-        self._producer_task = asyncio.create_task(self._produce_frames())
-        
+        if not self._producer_task:
+            raise RuntimeError("Producer task was not started. Call initialize() first.")
+
         while True:
             frame = await self._queue.get()
             if frame is None: # Sentinel reached
                 break
             yield frame
-            # Cede control to allow other tasks to run, crucial for pipeline backpressure
+            # A small sleep is still good for backpressure
             await asyncio.sleep(0.001)
 
     async def cleanup(self):
-        """Ensure the producer task is cancelled on cleanup."""
+        """Ensure the producer task is handled on cleanup."""
         if self._producer_task and not self._producer_task.done():
-            self._producer_task.cancel()
+            # The producer will finish on its own, but we could cancel if needed
+            pass
         await super().cleanup()
 
 
