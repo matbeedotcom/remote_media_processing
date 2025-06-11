@@ -121,6 +121,12 @@ class Qwen2_5OmniNode(Node):
         if not self.video_buffer and not self.audio_buffer:
             return None
         
+        self.logger.info(
+            f"Starting inference with "
+            f"{len(self.video_buffer)} video frames and "
+            f"{len(self.audio_buffer)} audio chunks."
+        )
+        
         with tempfile.TemporaryDirectory() as temp_dir:
             final_conversation = copy.deepcopy(self.conversation_template)
             video_path, audio_path = None, None
@@ -158,6 +164,9 @@ class Qwen2_5OmniNode(Node):
             return await asyncio.to_thread(_inference_thread)
 
     async def process(self, data_stream: AsyncGenerator[Any, None]) -> AsyncGenerator[Any, None]:
+        frame_count = 0
+        log_interval = 50  # Log buffer status every 50 video frames
+
         async for item in data_stream:
             # This node expects dictionaries from MediaReaderNode
             if not isinstance(item, dict):
@@ -168,6 +177,14 @@ class Qwen2_5OmniNode(Node):
                 frame = item['video']
                 self.video_buffer.append(frame.to_ndarray(format='rgb24'))
                 self.logger.debug(f"Buffered video frame with pts {frame.pts}")
+                
+                frame_count += 1
+                if frame_count % log_interval == 0:
+                    self.logger.info(
+                        f"Processed {frame_count} frames. "
+                        f"Current buffer: {len(self.video_buffer)} video frames, "
+                        f"{len(self.audio_buffer)} audio chunks."
+                    )
 
             elif 'audio' in item and isinstance(item['audio'], av.AudioFrame):
                 frame = item['audio']
@@ -188,12 +205,18 @@ class Qwen2_5OmniNode(Node):
                     yield result
                 self.video_buffer.clear()
                 self.audio_buffer.clear()
+        
+        # After the stream is exhausted, process any remaining data in the buffer
+        self.logger.info("Input stream finished. Processing remaining buffer...")
+        if self.video_buffer or self.audio_buffer:
+            result = await self._run_inference()
+            if result:
+                yield result
+            self.video_buffer.clear()
+            self.audio_buffer.clear()
 
     async def cleanup(self) -> None:
-        if self.video_buffer or self.audio_buffer:
-            self.logger.info("Flushing remaining media buffers during cleanup...")
-            await self._run_inference() # Result is not yielded here
-        
+        # Buffers are now flushed in process(), so cleanup just releases resources.
         self.video_buffer.clear()
         self.audio_buffer.clear()
         
