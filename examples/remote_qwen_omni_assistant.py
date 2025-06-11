@@ -85,7 +85,7 @@ async def main():
     
     # The source node reads the video and produces a stream of AV packets
     pipeline.add_node(MediaReaderNode(
-        path="https://qianwen-res.oss-cn-beijing.aliyuncs.com/Qwen2.5-Omni/draw.mp4"
+        path="/Users/mathieugosbee/dev/originals/remote_media_processing/examples/BigBuckBunny_320x180-trim.mp4"
     ))
     
     # This node extracts the video frames from the stream
