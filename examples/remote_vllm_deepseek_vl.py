@@ -80,16 +80,17 @@ async def main():
     logger.info("--- Running Remote VLLM DeepSeek-VL Pipeline ---")
 
     # 1. Define the VLLMNode instance locally.
-    #    This object will be serialized and sent to the server for execution.
+    #    The arguments now directly mirror the common parameters for vLLM's
+    #    engine, making configuration more straightforward.
     deepseek_vllm_node = VLLMNode(
-        model_id="deepseek-ai/deepseek-vl2-tiny",
+        model="deepseek-ai/deepseek-vl2-tiny",
         prompt_template="<|User|>: <image>\\n{question}\\n\\n<|Assistant|>:",
         modalities=["image"],
-        engine_args={
-            "max_model_len": 4096,
-            "max_num_seqs": 2,
-            "hf_overrides": {"architectures": ["DeepseekVLV2ForCausalLM"]},
-        },
+        max_model_len=4096,
+        max_num_seqs=2,
+        # Other engine arguments can be passed directly as kwargs.
+        # e.g., hf_overrides is passed to AsyncEngineArgs.
+        hf_overrides={"architectures": ["DeepseekVLV2ForCausalLM"]},
         sampling_params={
             "temperature": 0.2,
             "max_tokens": 128,

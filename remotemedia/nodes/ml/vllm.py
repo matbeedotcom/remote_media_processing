@@ -22,44 +22,85 @@ class VLLMNode(Node):
     A node that uses vLLM for high-throughput inference on Large Language Models.
     This node can handle text, image, and audio modalities depending on the
     model and configuration, and it can stream token responses.
+    Its constructor is designed to mirror the common arguments of `vllm.LLM`
+    for familiarity and ease of use.
     """
 
     def __init__(
         self,
-        model_id: str,
+        # --- Node-specific arguments ---
+        model: str,
         prompt_template: str,
         modalities: Optional[List[str]] = None,
-        engine_args: Optional[Dict[str, Any]] = None,
         sampling_params: Optional[Dict[str, Any]] = None,
-        **kwargs: Any,
+        
+        # --- Common vLLM Engine arguments (mirrored from vllm.LLM) ---
+        tokenizer: Optional[str] = None,
+        tokenizer_mode: str = 'auto',
+        trust_remote_code: bool = True,
+        tensor_parallel_size: int = 1,
+        dtype: str = 'auto',
+        quantization: Optional[str] = None,
+        gpu_memory_utilization: float = 0.90,
+        enforce_eager: bool = False,
+        max_model_len: Optional[int] = None,
+        max_num_seqs: Optional[int] = None,
+        
+        # --- Catch-all for other engine arguments ---
+        **engine_kwargs: Any,
     ):
         """
         Initializes the VLLMNode.
 
         Args:
-            model_id: The ID of the model to load from HuggingFace.
+            model: The ID of the model to load from HuggingFace.
             prompt_template: A string template for the prompt, with placeholders
                            for data from the input stream (e.g., "{text}").
                            It should also include multimodal placeholders like
                            "<image>" if modalities are used.
             modalities: A list of modalities the model expects (e.g., ["image"]).
-                        The node will look for these keys in the input data.
-            engine_args: A dictionary of arguments for vLLM's AsyncEngineArgs.
             sampling_params: A dictionary of parameters for vLLM's SamplingParams.
+            
+            tokenizer: The name or path of the tokenizer to use.
+            tokenizer_mode: The mode of the tokenizer ('auto', 'slow', or 'fast').
+            trust_remote_code: Whether to trust remote code from HuggingFace.
+            tensor_parallel_size: The number of GPUs to use for tensor parallelism.
+            dtype: The data type for the model weights ('auto', 'half', 'float16', 'bfloat16', 'float', 'float32').
+            quantization: The quantization method to use (e.g., 'awq', 'squeezellm').
+            gpu_memory_utilization: The fraction of GPU memory to reserve for the model.
+            enforce_eager: Whether to enforce eager execution.
+            max_model_len: The maximum sequence length for the model.
+            max_num_seqs: The maximum number of sequences to process in a batch.
+            engine_kwargs: Any other keyword arguments to be passed directly to
+                         the vLLM `AsyncEngineArgs`. This can include arguments
+                         like `hf_overrides`.
         """
-        super().__init__(**kwargs)
+        # Separate the 'name' kwarg for the base Node class
+        node_name = engine_kwargs.pop('name', None)
+        super().__init__(name=node_name)
+
         self.is_streaming = True
 
-        self.model_id = model_id
         self.prompt_template = prompt_template
         self.modalities = modalities or []
 
+        # Collect all engine arguments into a single dictionary
         self._engine_args = {
-            "model": self.model_id,
-            "trust_remote_code": True,
+            "model": model,
+            "tokenizer": tokenizer,
+            "tokenizer_mode": tokenizer_mode,
+            "trust_remote_code": trust_remote_code,
+            "tensor_parallel_size": tensor_parallel_size,
+            "dtype": dtype,
+            "quantization": quantization,
+            "gpu_memory_utilization": gpu_memory_utilization,
+            "enforce_eager": enforce_eager,
+            "max_model_len": max_model_len,
+            "max_num_seqs": max_num_seqs,
+            **engine_kwargs
         }
-        if engine_args:
-            self._engine_args.update(engine_args)
+        # Filter out None values so we don't pass them if they are not set
+        self._engine_args = {k: v for k, v in self._engine_args.items() if v is not None}
 
         self._sampling_params = {
             "temperature": 0.7,
@@ -77,7 +118,7 @@ class VLLMNode(Node):
         if not AsyncLLMEngine:
             raise NodeError("vLLM is not installed. Please install with 'pip install vllm'.")
 
-        logger.info(f"Initializing vLLM engine for model '{self.model_id}'...")
+        logger.info(f"Initializing vLLM engine for model '{self._engine_args['model']}'...")
         try:
             engine_args_obj = AsyncEngineArgs(**self._engine_args)
             # The from_engine_args method is synchronous and can block the event
