@@ -91,6 +91,9 @@ async def main():
     
     # This node extracts the video frames from the stream
     pipeline.add_node(VideoTrackSource())
+    
+    # This node extracts the audio from the stream
+    pipeline.add_node(AudioTrackSource())
 
     # The Qwen node is executed remotely, receiving the stream of video frames
     pipeline.add_node(remote_config(local_qwen_instance))
@@ -99,23 +102,25 @@ async def main():
         logger.info("Starting remote Qwen pipeline...")
         async with pipeline.managed_execution():
             text_response = ""
-            audio_response = None
+            audio_chunks = []
             
             logger.info("--- Assistant's Response ---")
-            async for chunk in pipeline.process():
-                if isinstance(chunk, str):
+            async for item_type, content in pipeline.process():
+                if item_type == "text":
                     # It's a text token, print it to the console in real-time
-                    print(chunk, end="", flush=True)
-                    text_response += chunk
-                elif isinstance(chunk, np.ndarray):
-                    # It's the final audio array
-                    audio_response = chunk
+                    print(content, end="", flush=True)
+                    text_response += content
+                elif item_type == "audio":
+                    # It's an audio chunk, buffer it
+                    audio_chunks.append(content)
             
             print("\n--------------------------") # Newline after text stream
 
-            if audio_response is not None and audio_response.size > 0:
+            if audio_chunks:
+                # Stitch the audio chunks together
+                full_audio = np.concatenate(audio_chunks, axis=0)
                 output_filename = "remote_qwen_output.wav"
-                await asyncio.to_thread(sf.write, output_filename, audio_response, samplerate=24000)
+                await asyncio.to_thread(sf.write, output_filename, full_audio, samplerate=24000)
                 logger.info(f"Generated audio saved to '{os.path.abspath(output_filename)}'")
             else:
                 logger.info("No audio was generated for this response.")
