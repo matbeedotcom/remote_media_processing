@@ -167,42 +167,22 @@ class AudioTrackSource(TrackSource):
 
 class VideoTrackSource(TrackSource):
     """
-    A video track source node that converts `av.VideoFrame` objects into NumPy arrays.
+    A video track source node that extracts `av.VideoFrame` objects from a
+    mixed media stream.
     """
     _track_type = "video"
     _frame_type = VideoFrame
 
-    def __init__(self, output_format: str = "bgr24", **kwargs):
-        """
-        Initializes the VideoTrackSource node.
-
-        Args:
-            output_format (str): The desired output format for the NumPy array
-                                 (e.g., 'bgr24', 'rgb24').
-        """
-        super().__init__(**kwargs)
-        self.output_format = output_format
-
     def _process_frame(self, frame: VideoFrame) -> Any:
         """
-        Converts an `av.VideoFrame` to a NumPy array.
-
-        Args:
-            frame: An `av.VideoFrame`.
-
-        Returns:
-            A NumPy array representing the video frame.
+        Passes the `av.VideoFrame` through without modification.
+        The actual decoding or conversion should be handled by a subsequent node.
         """
-        try:
-            video_data = frame.to_ndarray(format=self.output_format)
-            logger.debug(
-                f"VideoTrackSource '{self.name}': processed video frame with "
-                f"resolution {frame.width}x{frame.height}."
-            )
-            return video_data
-        except Exception as e:
-            logger.error(f"Error converting video frame to numpy array: {e}")
-            return None
+        logger.debug(
+            f"VideoTrackSource '{self.name}': passing through video frame with "
+            f"resolution {frame.width}x{frame.height}."
+        )
+        return frame
 
 
 class LocalMediaReaderNode(Node):

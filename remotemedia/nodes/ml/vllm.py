@@ -127,13 +127,18 @@ class VLLMNode(Node):
                         "input data. It will be omitted."
                     )
 
+            # For AsyncLLMEngine, multimodal data is passed as part of a
+            # dictionary to the 'prompt' argument.
+            llm_inputs = {"prompt": prompt}
+            if multi_modal_data:
+                llm_inputs["multi_modal_data"] = multi_modal_data
+
             request_id = f"vllm-node-{time.time()}-{id(data)}"
 
             results_generator = self.engine.generate(
-                prompt,
+                llm_inputs,
                 self.sampling_params_obj,
                 request_id,
-                multi_modal_data=multi_modal_data or None,
             )
 
             previous_text = ""
