@@ -45,7 +45,7 @@ class Qwen2_5OmniNode(Node):
                  video_fps: int = 10,
                  audio_sample_rate: int = 16000,
                  speaker: Optional[str] = None,
-                 use_audio_in_video: bool = True,
+                 use_audio_in_video: bool = False,
                  **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.is_streaming = True
