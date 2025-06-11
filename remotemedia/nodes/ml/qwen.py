@@ -159,24 +159,30 @@ class Qwen2_5OmniNode(Node):
 
     async def process(self, data_stream: AsyncGenerator[Any, None]) -> AsyncGenerator[Any, None]:
         async for item in data_stream:
-            # Defensive unpacking with logging to debug the stream format
-            if not isinstance(item, tuple) or len(item) != 2:
-                self.logger.warning(f"Qwen node received item of unexpected format, skipping. Got {type(item)} with len {len(item) if hasattr(item, '__len__') else 'N/A'}")
+            # This node expects dictionaries from MediaReaderNode
+            if not isinstance(item, dict):
+                self.logger.warning(f"Qwen node received non-dict item, skipping. Got {type(item)}")
                 continue
-            
-            data, _ = item
 
-            if isinstance(data, av.VideoFrame):
-                self.video_buffer.append(data.to_ndarray(format='rgb24'))
-            elif isinstance(data, av.AudioFrame):
+            if 'video' in item and isinstance(item['video'], av.VideoFrame):
+                frame = item['video']
+                self.video_buffer.append(frame.to_ndarray(format='rgb24'))
+                self.logger.debug(f"Buffered video frame with pts {frame.pts}")
+
+            elif 'audio' in item and isinstance(item['audio'], av.AudioFrame):
+                frame = item['audio']
+                # Resample audio to the rate expected by the model
                 resampled_chunk = librosa.resample(
-                    data.to_ndarray().astype(np.float32).mean(axis=0),  # aac is stereo
-                    orig_sr=data.sample_rate,
+                    frame.to_ndarray().astype(np.float32).mean(axis=0),
+                    orig_sr=frame.sample_rate,
                     target_sr=self.audio_sample_rate
                 )
                 self.audio_buffer.append(resampled_chunk)
+                self.logger.debug(f"Buffered audio frame with pts {frame.pts}")
 
+            # Check if video buffer is full enough to trigger processing
             if len(self.video_buffer) >= self.video_buffer_max_frames:
+                self.logger.info(f"Video buffer full ({len(self.video_buffer)} frames). Triggering inference.")
                 result = await self._run_inference()
                 if result:
                     yield result

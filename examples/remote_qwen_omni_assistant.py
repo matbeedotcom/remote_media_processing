@@ -33,7 +33,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from remotemedia.core.node import RemoteExecutorConfig
 from remotemedia.core.pipeline import Pipeline
 from remotemedia.nodes.ml import Qwen2_5OmniNode
-from remotemedia.nodes.source import MediaReaderNode, VideoTrackSource
+from remotemedia.nodes.source import MediaReaderNode
 
 # Configure basic logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -88,10 +88,11 @@ async def main():
         path="https://qianwen-res.oss-cn-beijing.aliyuncs.com/Qwen2.5-Omni/draw.mp4"
     ))
     
-    # This node extracts the video frames from the stream
-    pipeline.add_node(VideoTrackSource())
+    # This node is no longer needed, as the Qwen node now handles the
+    # raw dictionary stream from MediaReaderNode directly.
+    # pipeline.add_node(VideoTrackSource())
 
-    # The Qwen node is executed remotely, receiving the stream of video frames
+    # The Qwen node is executed remotely, receiving the stream of media packets
     pipeline.add_node(remote_config(local_qwen_instance))
 
     try:
