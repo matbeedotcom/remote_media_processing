@@ -164,14 +164,30 @@ class Qwen2_5OmniNode(Node):
             return await asyncio.to_thread(_inference_thread)
 
     async def process(self, data_stream: AsyncGenerator[Any, None]) -> AsyncGenerator[Any, None]:
-        async for data, timestamp in data_stream:
-            if isinstance(data, np.ndarray) and data.ndim == 3:  # Video frame
-                self.video_buffer.append(data)
-                self.logger.debug(f"Buffered video frame with pts {timestamp}")
+        # Lazy initialization: ensure the model is loaded before processing.
+        if not self.is_initialized:
+            await self.initialize()
 
-            elif isinstance(data, np.ndarray) and data.ndim <= 2:  # Audio frame
-                self.audio_buffer.append(data)
-                self.logger.debug(f"Buffered audio chunk with pts {timestamp}")
+        async for item in data_stream:
+            # This node expects dictionaries from MediaReaderNode
+            if not isinstance(item, dict):
+                continue
+
+            if 'video' in item and isinstance(item['video'], av.VideoFrame):
+                frame = item['video']
+                self.video_buffer.append(frame.to_ndarray(format='rgb24'))
+                self.logger.debug(f"Buffered video frame with pts {frame.pts}")
+
+            elif 'audio' in item and isinstance(item['audio'], av.AudioFrame):
+                frame = item['audio']
+                # Resample audio to the rate expected by the model
+                resampled_chunk = librosa.resample(
+                    frame.to_ndarray().astype(np.float32).mean(axis=0),
+                    orig_sr=frame.sample_rate,
+                    target_sr=self.audio_sample_rate
+                )
+                self.audio_buffer.append(resampled_chunk)
+                self.logger.debug(f"Buffered audio frame with pts {frame.pts}")
 
             # Check if video buffer is full enough to trigger processing
             if len(self.video_buffer) >= self.video_buffer_max_frames:
@@ -183,11 +199,11 @@ class Qwen2_5OmniNode(Node):
                 self.audio_buffer.clear()
         
         # After the stream is exhausted, process any remaining data in the buffer
-        self.logger.info(
-            f"Input stream finished. Processing remaining buffer with "
-            f"{len(self.video_buffer)} video frames and {len(self.audio_buffer)} audio chunks."
-        )
         if self.video_buffer or self.audio_buffer:
+            self.logger.info(
+                f"Input stream finished. Processing remaining buffer with "
+                f"{len(self.video_buffer)} video frames and {len(self.audio_buffer)} audio chunks."
+            )
             result = await self._run_inference()
             if result:
                 yield result

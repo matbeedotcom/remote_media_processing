@@ -329,8 +329,11 @@ class RemoteExecutionServicer(execution_pb2_grpc.RemoteExecutionServiceServicer)
                  return
 
             async def input_stream_generator():
+                chunk_count = 0
                 async for req in request_iterator:
                     if req.HasField("data"):
+                        chunk_count += 1
+                        self.logger.debug(f"Server: Received chunk {chunk_count} for remote object.")
                         yield serializer.deserialize(req.data)
 
             # Pass the async generator directly to the process method

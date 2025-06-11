@@ -6,6 +6,7 @@ for example by reading from a file, network stream, or hardware device.
 """
 import asyncio
 import logging
+import os
 from typing import AsyncGenerator, Any
 
 import numpy as np
@@ -88,9 +89,9 @@ class MediaReaderNode(Node):
             item = await queue.get()
             if item is _sentinel:
                 finished_tracks += 1
-                logger.info(f"A track reader finished. {finished_tracks}/{len(tasks)} done.")
+                logger.debug(f"A track reader finished. {finished_tracks}/{len(tasks)} done.")
             else:
-                logger.debug("Yielding frame from queue.")
+                logger.debug(f"MediaReaderNode: Yielding frame from queue.")
                 yield item
         logger.info("All track readers have finished.")
 
@@ -121,7 +122,8 @@ class TrackSource(Node):
                 f"'{self._track_type}' with unexpected frame type {type(frame)}."
             )
             return None
-
+        
+        logger.debug(f"{self.__class__.__name__}: Processing frame.")
         return self._process_frame(frame)
 
     def _process_frame(self, frame: Frame) -> Any:
@@ -204,4 +206,43 @@ class VideoTrackSource(TrackSource):
             return None
 
 
-__all__ = ["MediaReaderNode", "AudioTrackSource", "VideoTrackSource", "TrackSource"] 
+class LocalMediaReaderNode(Node):
+    """
+    A robust media reader that uses PyAV directly to stream frames from a
+    local media file, offering better compatibility than aiortc.MediaPlayer.
+    """
+    def __init__(self, path: str, **kwargs):
+        super().__init__(**kwargs)
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"Media file not found at path: {path}")
+        self.path = path
+
+    async def process(self, data: Any = None) -> AsyncGenerator[Any, None]:
+        """Reads the media file and yields frames as dictionaries."""
+        try:
+            import av
+        except ImportError:
+            raise NodeError("PyAV is required for LocalMediaReaderNode. Please install it.")
+
+        container = av.open(self.path)
+        
+        video_stream = next((s for s in container.streams if s.type == 'video'), None)
+        audio_stream = next((s for s in container.streams if s.type == 'audio'), None)
+
+        if not video_stream and not audio_stream:
+            logger.warning(f"No audio or video streams found in '{self.path}'")
+            return
+
+        logger.info(f"Streaming from '{self.path}' with PyAV...")
+        for packet in container.demux(video=0 if video_stream else (), audio=0 if audio_stream else ()):
+            for frame in packet.decode():
+                if isinstance(frame, av.VideoFrame):
+                    yield {'video': frame}
+                elif isinstance(frame, av.AudioFrame):
+                    yield {'audio': frame}
+            # Allow other tasks to run
+            await asyncio.sleep(0)
+        logger.info(f"Finished streaming from '{self.path}'")
+
+
+__all__ = ["MediaReaderNode", "AudioTrackSource", "VideoTrackSource", "TrackSource", "LocalMediaReaderNode"] 

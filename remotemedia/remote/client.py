@@ -265,8 +265,11 @@ class RemoteExecutionClient:
             )
             yield execution_pb2.StreamObjectRequest(init=init_message)
 
+            chunk_count = 0
             async for item in input_stream:
-                serialized_data = serializer.serialize(item)
+                chunk_count += 1
+                logger.debug(f"Client: Sending chunk {chunk_count} to remote object.")
+                serialized_data, _ = serializer.serialize(item)
                 yield execution_pb2.StreamObjectRequest(data=serialized_data)
 
         try:
