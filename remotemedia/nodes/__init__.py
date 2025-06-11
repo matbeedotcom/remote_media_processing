@@ -23,7 +23,7 @@ from .video import VideoTransform, VideoBuffer, VideoResizer
 from .remote import RemoteExecutionNode, RemoteObjectExecutionNode
 from .serialized_class_executor import SerializedClassExecutorNode
 from .custom import StatefulCounter
-from .ml import WhisperTranscriptionNode, UltravoxNode, TransformersPipelineNode
+from .ml import WhisperTranscriptionNode, UltravoxNode, TransformersPipelineNode, Qwen2_5OmniNode
 # from .ml import WhisperTranscriptionNode, UltravoxNode
 
 # ML nodes will be added in later phases
@@ -59,4 +59,5 @@ __all__ = [
     "WhisperTranscriptionNode",
     "UltravoxNode",
     "TransformersPipelineNode",
+    "Qwen2_5OmniNode",
 ] 

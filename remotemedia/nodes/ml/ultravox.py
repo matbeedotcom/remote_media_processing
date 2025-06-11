@@ -104,16 +104,16 @@ class UltravoxNode(Node):
                 max_new_tokens=self.max_new_tokens
             )
             logger.info(f"Ultravox result: {result}")
-            # The pipeline's output for this model is a list containing a single dictionary,
-            # where 'generated_text' holds the final response string.
-            if not (isinstance(result, list) and result and
-                    isinstance(result[0], dict) and 'generated_text' in result[0]):
-                logger.warning(f"Model did not return an expected response format. Full result: {result}")
-                return None
+            # The pipeline's output for this model can be a list containing a single dictionary
+            # with 'generated_text', or just a raw string.
+            response = None
+            if isinstance(result, list) and result and isinstance(result[0], dict) and 'generated_text' in result[0]:
+                response = result[0]['generated_text']
+            elif isinstance(result, str):
+                response = result
 
-            response = result[0]['generated_text']
             if not isinstance(response, str):
-                logger.warning(f"Expected 'generated_text' to be a string, but got {type(response)}. Full result: {result}")
+                logger.warning(f"Model did not return an expected string response. Full result: {result}")
                 return None
 
             response = response.strip()

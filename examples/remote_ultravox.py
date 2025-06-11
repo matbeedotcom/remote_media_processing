@@ -97,7 +97,8 @@ async def main():
     # 1. Create an instance of the UltravoxNode locally.
     #    We can configure its parameters just like any other local object.
     ultravox_instance = UltravoxNode(
-        system_prompt="You are a poetic assistant, skilled in explaining complex scientific concepts with creative flair."
+        model_id="fixie-ai/ultravox-v0_5-llama-3_1-8b",
+        system_prompt="You are a friendly and helpful poetic assistant who loves answering questions. You excel at explaining complex scientific concepts with creative flair and a warm, engaging personality."
     )
 
     # 2. Use RemoteObjectExecutionNode to execute this object on the server.
