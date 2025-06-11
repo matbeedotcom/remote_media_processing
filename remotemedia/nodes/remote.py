@@ -119,9 +119,14 @@ class RemoteObjectExecutionNode(Node):
         await self.client.connect()
 
         logger.info(f"Initializing remote object for node '{self.name}'...")
+        # The server is expected to automatically call 'initialize' on any new
+        # object it receives. Explicitly calling 'initialize' again here causes
+        # a double initialization. We now call a cheap, harmless method like
+        # '__str__' to establish the session while relying on the server's
+        # implicit, single initialization.
         response = await self.client.execute_object_method(
             obj=self.obj_to_execute,
-            method_name='initialize',
+            method_name='__str__',
             method_args=[]
         )
         self.session_id = response.get('session_id')
@@ -157,8 +162,9 @@ class RemoteObjectExecutionNode(Node):
         else:
             # Non-streaming case: process a single item
             try:
-                # We need a new client method for single-item execution
-                # For now, let's assume it exists and is called `execute_object_method`
+                # TODO: The `execute_object_method` is likely incorrect for this use case,
+                # as it re-sends the object every time. A new client method that
+                # executes a method on an existing session_id is needed.
                 result = await self.client.execute_object_method(
                     obj=self.obj_to_execute,
                     method_name='process',

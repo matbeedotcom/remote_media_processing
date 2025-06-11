@@ -106,15 +106,19 @@ class Qwen2_5OmniNode(Node):
             logger.info(f"Using attn_implementation: {self.attn_implementation}")
         
         try:
+            print(f"Qwen2_5OmniNode.initialize: Initializing model {self.model_id} with kwargs {model_kwargs}")
             self.model = await asyncio.to_thread(
                 Qwen2_5OmniForConditionalGeneration.from_pretrained, self.model_id, **model_kwargs)
+            print(f"Qwen2_5OmniNode.initialize: Model initialized")
             self.processor = await asyncio.to_thread(
                 Qwen2_5OmniProcessor.from_pretrained, self.model_id)
-            
+            print(f"Qwen2_5OmniNode.initialize: Processor initialized")
             if self.device == "mps":
                 self.model.to(self.device)
+            print(f"Qwen2_5OmniNode.initialize: Model moved to device {self.device}")
 
             logger.info("Qwen2.5-Omni model initialized successfully.")
+            self.is_initialized = True
         except Exception as e:
             raise NodeError(f"Failed to initialize Qwen2.5-Omni model: {e}")
 
