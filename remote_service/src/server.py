@@ -227,6 +227,7 @@ class RemoteExecutionServicer(execution_pb2_grpc.RemoteExecutionServiceServicer)
 
                 # Initialize object if it has an initialize method
                 if hasattr(obj, 'initialize') and callable(getattr(obj, 'initialize')):
+                    print(f"remote_service.ExecuteObjectMethod: Initializing object {obj} with method {obj.initialize}")
                     await obj.initialize()
 
             # Deserialize arguments
@@ -313,7 +314,7 @@ class RemoteExecutionServicer(execution_pb2_grpc.RemoteExecutionServiceServicer)
             if not hasattr(obj, 'initialize') or not hasattr(obj, 'process') or not hasattr(obj, 'cleanup'):
                  yield execution_pb2.StreamObjectResponse(error="Serialized object must have initialize, process, and cleanup methods.")
                  return
-
+            print(f"remote_service.StreamObject: Initializing object {obj} with method {obj.initialize}")
             await obj.initialize()
 
             serialization_format = init_request.serialization_format
@@ -411,6 +412,7 @@ class RemoteExecutionServicer(execution_pb2_grpc.RemoteExecutionServiceServicer)
             
             NodeClass = getattr(nodes, node_type)
             node = NodeClass(**config)
+            print(f"remote_service.StreamNode: Initializing node {node} with method {node.initialize}")
             await node.initialize()
 
             # Get the correct serializer
