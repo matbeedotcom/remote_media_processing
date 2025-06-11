@@ -138,19 +138,28 @@ class Qwen2_5OmniNode(Node):
             if self.audio_buffer:
                 audio_path = await self._save_audio_buffer(temp_dir)
             
-            # Inject media paths into conversation template
+            # This node's purpose is to add media from the stream to the conversation.
+            # So, we'll inject the paths we just created.
             self._inject_media_paths(final_conversation, video_path, audio_path)
+
+            # If this node buffered and injected its own audio, we must tell the model
+            # to use it, overriding the initial `use_audio_in_video` setting.
+            use_audio_in_video_flag = self.use_audio_in_video
+            if audio_path:
+                use_audio_in_video_flag = False
 
             def _inference_thread():
                 text = self.processor.apply_chat_template(final_conversation, add_generation_prompt=True, tokenize=False)
-                audios, images, videos = process_mm_info(final_conversation, use_audio_in_video=self.use_audio_in_video)
                 
-                inputs = self.processor(text=text, audio=audios, images=images, videos=videos, return_tensors="pt", padding=True, use_audio_in_video=self.use_audio_in_video)
+                self.logger.info(f"Running inference with use_audio_in_video={use_audio_in_video_flag}")
+                audios, images, videos = process_mm_info(final_conversation, use_audio_in_video=use_audio_in_video_flag)
+                
+                inputs = self.processor(text=text, audio=audios, images=images, videos=videos, return_tensors="pt", padding=True, use_audio_in_video=use_audio_in_video_flag)
                 inputs = inputs.to(self.model.device)
                 if self.torch_dtype != 'auto':
                     inputs = inputs.to(self.torch_dtype)
 
-                generate_kwargs = {"use_audio_in_video": self.use_audio_in_video}
+                generate_kwargs = {"use_audio_in_video": use_audio_in_video_flag}
                 if self.speaker:
                     generate_kwargs["speaker"] = self.speaker
 
@@ -241,14 +250,46 @@ class Qwen2_5OmniNode(Node):
         await asyncio.to_thread(sf.write, audio_path, full_audio, self.audio_sample_rate)
         return audio_path
 
-    def _inject_media_paths(self, conversation, video_path, audio_path):
+    def _inject_media_paths(self, conversation: List[Dict[str, Any]], video_path: Optional[str], audio_path: Optional[str]) -> None:
+        """
+        Injects media file paths into the conversation.
+
+        This method finds the first user turn and ensures the video and audio paths
+        are present, either by replacing placeholders or by adding new entries if
+        placeholders do not exist.
+        """
         for turn in conversation:
-            content = turn.get("content")
-            if isinstance(content, list):
-                for item in content:
-                    if video_path and item.get("type") == "video" and item.get("video") == "<video_placeholder>":
-                        item["video"] = video_path
-                    if audio_path and item.get("type") == "audio" and item.get("audio") == "<audio_placeholder>":
-                        item["audio"] = audio_path
+            if turn.get("role") == "user":
+                content = turn.get("content", [])
+                if not isinstance(content, list):
+                    continue
+
+                video_injected = False
+                if video_path:
+                    for item in content:
+                        if item.get("type") == "video":
+                            item["video"] = video_path
+                            video_injected = True
+                            self.logger.info(f"Injected video path '{video_path}' into conversation.")
+                            break
+                    if not video_injected:
+                        content.insert(0, {"type": "video", "video": video_path})
+                        self.logger.info(f"Added video path '{video_path}' to conversation.")
+
+                audio_injected = False
+                if audio_path:
+                    for item in content:
+                        if item.get("type") == "audio":
+                            item["audio"] = audio_path
+                            audio_injected = True
+                            self.logger.info(f"Injected audio path '{audio_path}' into conversation.")
+                            break
+                    if not audio_injected:
+                        content.insert(0, {"type": "audio", "audio": audio_path})
+                        self.logger.info(f"Added audio path '{audio_path}' to conversation.")
+
+                turn["content"] = content
+                # We only inject into the first user turn found.
+                return
 
 __all__ = ["Qwen2_5OmniNode"] 
