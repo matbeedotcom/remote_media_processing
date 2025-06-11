@@ -165,20 +165,14 @@ class Qwen2_5OmniNode(Node):
     async def process(self, data_stream: AsyncGenerator[Any, None]) -> AsyncGenerator[Any, None]:
         self.logger.info("Qwen process method started.")
         async for data in data_stream:
-            self.logger.info(f"Qwen received data of type: {type(data)}")
-            # Handle both direct av.VideoFrame objects and deserialized dicts
-            if isinstance(data, (av.VideoFrame, dict)):
-                if isinstance(data, dict):
-                    # Re-create the frame if it's a dict. This is a fallback.
-                    # This assumes a simple dict representation; might need adjustment.
-                    try:
-                        frame = av.VideoFrame.from_ndarray(data['ndarray'], format=data['format'])
-                        self.video_buffer.append(frame.to_ndarray(format='rgb24'))
-                    except (KeyError, TypeError):
-                        self.logger.warning(f"Received a dict, but it couldn't be converted to a VideoFrame: {data.keys()}")
-                else:
-                    self.video_buffer.append(data.to_ndarray(format='rgb24'))
-
+            # When data is serialized and sent over the network, complex objects like
+            # av.VideoFrame can be converted to their underlying numpy array representation.
+            # We need to handle both the direct object (for local runs) and the raw
+            # array (for remote runs).
+            if isinstance(data, av.VideoFrame):
+                self.video_buffer.append(data.to_ndarray(format='rgb24'))
+            elif isinstance(data, np.ndarray):
+                self.video_buffer.append(data)
             elif isinstance(data, av.AudioFrame):
                 resampled_chunk = librosa.resample(
                     data.to_ndarray().astype(np.float32).mean(axis=0),  # aac is stereo
@@ -186,6 +180,8 @@ class Qwen2_5OmniNode(Node):
                     target_sr=self.audio_sample_rate
                 )
                 self.audio_buffer.append(resampled_chunk)
+            else:
+                self.logger.warning(f"Qwen node received unexpected data type: {type(data)}")
 
             if len(self.video_buffer) >= self.video_buffer_max_frames:
                 self.logger.info(f"Buffer full ({len(self.video_buffer)} frames). Running inference...")
