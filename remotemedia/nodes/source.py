@@ -216,34 +216,51 @@ class LocalMediaReaderNode(Node):
         if not os.path.exists(path):
             raise FileNotFoundError(f"Media file not found at path: {path}")
         self.path = path
+        self._queue = asyncio.Queue(maxsize=100)
+        self._producer_task = None
 
-    async def process(self, data: Any = None) -> AsyncGenerator[Any, None]:
-        """Reads the media file and yields frames as dictionaries."""
+    async def _produce_frames(self):
+        """Internal task to read the file and put frames onto the queue."""
         try:
             import av
-        except ImportError:
-            raise NodeError("PyAV is required for LocalMediaReaderNode. Please install it.")
+            container = av.open(self.path)
+            video_stream = next((s for s in container.streams if s.type == 'video'), None)
+            audio_stream = next((s for s in container.streams if s.type == 'audio'), None)
 
-        container = av.open(self.path)
+            if not video_stream and not audio_stream:
+                logger.warning(f"No audio or video streams found in '{self.path}'")
+                return
+
+            logger.info(f"Producer starting to stream from '{self.path}'...")
+            for packet in container.demux(video=0 if video_stream else (), audio=0 if audio_stream else ()):
+                for frame in packet.decode():
+                    if isinstance(frame, av.VideoFrame):
+                        await self._queue.put({'video': frame})
+                    elif isinstance(frame, av.AudioFrame):
+                        await self._queue.put({'audio': frame})
+            logger.info("Producer finished streaming file.")
+        except Exception as e:
+            logger.error(f"Error in media file producer: {e}", exc_info=True)
+        finally:
+            await self._queue.put(None) # Sentinel to signal the end
+
+    async def process(self, data: Any = None) -> AsyncGenerator[Any, None]:
+        """Yields frames from the internal queue."""
+        self._producer_task = asyncio.create_task(self._produce_frames())
         
-        video_stream = next((s for s in container.streams if s.type == 'video'), None)
-        audio_stream = next((s for s in container.streams if s.type == 'audio'), None)
-
-        if not video_stream and not audio_stream:
-            logger.warning(f"No audio or video streams found in '{self.path}'")
-            return
-
-        logger.info(f"Streaming from '{self.path}' with PyAV...")
-        for packet in container.demux(video=0 if video_stream else (), audio=0 if audio_stream else ()):
-            for frame in packet.decode():
-                if isinstance(frame, av.VideoFrame):
-                    yield {'video': frame}
-                elif isinstance(frame, av.AudioFrame):
-                    yield {'audio': frame}
-            # Cede control to the event loop to allow downstream processing.
-            # A non-zero sleep is crucial for network-bound downstream nodes.
+        while True:
+            frame = await self._queue.get()
+            if frame is None: # Sentinel reached
+                break
+            yield frame
+            # Cede control to allow other tasks to run, crucial for pipeline backpressure
             await asyncio.sleep(0.001)
-        logger.info(f"Finished streaming from '{self.path}'")
+
+    async def cleanup(self):
+        """Ensure the producer task is cancelled on cleanup."""
+        if self._producer_task and not self._producer_task.done():
+            self._producer_task.cancel()
+        await super().cleanup()
 
 
 __all__ = ["MediaReaderNode", "AudioTrackSource", "VideoTrackSource", "TrackSource", "LocalMediaReaderNode"] 
