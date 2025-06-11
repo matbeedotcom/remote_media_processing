@@ -100,13 +100,33 @@ class RemoteObjectExecutionNode(Node):
         self.remote_config = remote_config
         self.node_config = node_config or {}
         self.client: Optional[RemoteExecutionClient] = None
+        self.session_id: Optional[str] = None
         self.is_streaming = getattr(self.obj_to_execute, 'is_streaming', False)
 
     async def initialize(self):
-        """Initializes the remote execution client."""
+        """
+        Initializes the remote object by sending it to the server, having it
+        initialized there, and establishing a session.
+        """
         await super().initialize()
-        self.client = RemoteExecutionClient(self.remote_config)
+        
+        # Pass channel options to allow for large messages.
+        channel_options = [
+            ('grpc.max_send_message_length', -1),
+            ('grpc.max_receive_message_length', -1),
+        ]
+        self.client = RemoteExecutionClient(self.remote_config, channel_options=channel_options)
         await self.client.connect()
+
+        logger.info(f"Initializing remote object for node '{self.name}'...")
+        response = await self.client.execute_object_method(
+            obj=self.obj_to_execute,
+            method_name='initialize',
+            method_args=[]
+        )
+        self.session_id = response.get('session_id')
+        if not self.session_id:
+            raise NodeError("Failed to get a session ID for the remote object.")
 
     async def cleanup(self):
         """Disconnects the remote execution client."""
@@ -124,17 +144,11 @@ class RemoteObjectExecutionNode(Node):
             raise NodeError("Remote client not initialized.")
         
         if self.is_streaming:
-            # We need to wrap the input stream to serialize each item before sending.
-            # The remote end will deserialize each item.
-            async def serialized_stream_generator(input_stream: AsyncGenerator[Any, None]):
-                async for item in input_stream:
-                    yield item
-
             try:
                 async for result in self.client.stream_object(
-                    obj=self.obj_to_execute,
+                    session_id=self.session_id,
                     config=self.node_config,
-                    input_stream=serialized_stream_generator(data)
+                    input_stream=data
                 ):
                     yield result
             except Exception as e:

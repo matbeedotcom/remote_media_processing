@@ -73,6 +73,7 @@ class Qwen2_5OmniNode(Node):
         """
         Load the model and processor. This runs on the execution environment (local or remote).
         """
+        await super().initialize()
         if not all([torch, av, Qwen2_5OmniForConditionalGeneration, Qwen2_5OmniProcessor, process_mm_info]):
              raise NodeError("Required ML libraries (torch, transformers, soundfile, pyav, qwen_omni_utils) are not installed.")
 

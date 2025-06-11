@@ -6,6 +6,7 @@ for example by reading from a file, network stream, or hardware device.
 """
 import asyncio
 import logging
+import os
 from typing import AsyncGenerator, Any
 
 import numpy as np
@@ -204,4 +205,72 @@ class VideoTrackSource(TrackSource):
             return None
 
 
-__all__ = ["MediaReaderNode", "AudioTrackSource", "VideoTrackSource", "TrackSource"] 
+class LocalMediaReaderNode(Node):
+    """
+    A robust media reader that uses PyAV directly to stream frames from a
+    local media file. It runs the blocking I/O in a separate thread to
+    prevent stalling the asyncio event loop, which is critical for pipelines
+    that include network-bound nodes.
+    """
+    def __init__(self, path: str, **kwargs):
+        super().__init__(**kwargs)
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"Media file not found at path: {path}")
+        self.path = path
+        self._queue = asyncio.Queue(100)
+        self._producer_task = None
+        self._loop = None
+
+    def _producer_thread(self):
+        """This function runs in a separate thread, reading the file
+        and putting frames onto the asyncio queue in a thread-safe manner."""
+        try:
+            import av
+            container = av.open(self.path)
+            logger.info(f"Producer thread starting to stream from '{self.path}'...")
+            for frame in container.decode(video=0, audio=0):
+                future = asyncio.run_coroutine_threadsafe(self._queue.put(frame), self._loop)
+                future.result() # Wait for the item to be put in the queue, providing backpressure
+            logger.info("Producer thread finished streaming file.")
+        except Exception as e:
+             logger.error(f"Error in media file producer thread: {e}", exc_info=True)
+        finally:
+            # Signal the end of the stream
+            asyncio.run_coroutine_threadsafe(self._queue.put(None), self._loop)
+
+    async def initialize(self):
+        """Start the producer thread."""
+        await super().initialize()
+        if self._producer_task is None:
+            self._loop = asyncio.get_running_loop()
+            self._producer_task = asyncio.to_thread(self._producer_thread)
+
+    async def process(self, data: Any = None) -> AsyncGenerator[Any, None]:
+        """Yields frames from the internal queue."""
+        if self._producer_task is None:
+            await self.initialize()
+
+        while True:
+            frame = await self._queue.get()
+            if frame is None: # Sentinel reached
+                break
+            
+            item = None
+            if isinstance(frame, av.VideoFrame):
+                item = {'video': frame}
+            elif isinstance(frame, av.AudioFrame):
+                item = {'audio': frame}
+            
+            if item:
+                yield item
+        
+        await self._producer_task
+
+    async def cleanup(self):
+        """Ensure the producer task is awaited on cleanup."""
+        if self._producer_task and not self._producer_task.done():
+            await self._producer_task
+        await super().cleanup()
+
+
+__all__ = ["MediaReaderNode", "AudioTrackSource", "VideoTrackSource", "TrackSource", "LocalMediaReaderNode"] 

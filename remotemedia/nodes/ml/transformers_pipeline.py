@@ -57,6 +57,7 @@ class TransformersPipelineNode(Node):
         This method handles heavy imports and model downloading, making it suitable
         for execution on a remote server.
         """
+        await super().initialize()
         self.logger.info(f"Initializing node '{self.name}'...")
         try:
             from transformers import pipeline

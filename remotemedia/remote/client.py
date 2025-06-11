@@ -7,7 +7,7 @@ the remote execution service via gRPC.
 
 import asyncio
 import logging
-from typing import Any, Dict, Optional, List, AsyncGenerator
+from typing import Any, Dict, Optional, List, AsyncGenerator, Tuple
 import grpc
 import cloudpickle
 
@@ -43,14 +43,16 @@ class RemoteExecutionClient:
     Client for communicating with the remote execution service.
     """
     
-    def __init__(self, config: RemoteExecutorConfig):
+    def __init__(self, config: RemoteExecutorConfig, channel_options: Optional[List[Tuple[str, Any]]] = None):
         """
         Initialize the remote execution client.
         
         Args:
             config: Remote executor configuration
+            channel_options: Optional list of gRPC channel options.
         """
         self.config = config
+        self.channel_options = channel_options
         self.channel: Optional[grpc.aio.Channel] = None
         self.stub: Optional[Any] = None
         
@@ -78,11 +80,13 @@ class RemoteExecutionClient:
                 credentials = grpc.ssl_channel_credentials()
                 self.channel = grpc.aio.secure_channel(
                     f"{self.config.host}:{self.config.port}",
-                    credentials
+                    credentials,
+                    options=self.channel_options
                 )
             else:
                 self.channel = grpc.aio.insecure_channel(
-                    f"{self.config.host}:{self.config.port}"
+                    f"{self.config.host}:{self.config.port}",
+                    options=self.channel_options
                 )
             
             # Create stub
@@ -236,13 +240,15 @@ class RemoteExecutionClient:
     
     async def stream_object(
         self,
-        obj: Any,
         config: Dict[str, Any],
         input_stream: AsyncGenerator[Any, None],
-        serialization_format: str = "pickle"
+        serialization_format: str = "pickle",
+        obj: Optional[Any] = None,
+        session_id: Optional[str] = None
     ) -> AsyncGenerator[Any, None]:
         """
         Execute a serialized object with a streaming input/output.
+        Can either create a new object or stream to an existing one via session_id.
         """
         if not self.stub:
             raise RemoteExecutionError("Not connected to remote service")

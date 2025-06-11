@@ -54,6 +54,7 @@ class UltravoxNode(Node):
         """
         Load the model and processor. This runs on the execution environment (local or remote).
         """
+        await super().initialize()
         try:
             import torch
             from transformers import pipeline
