@@ -592,7 +592,7 @@ class HealthServicer(health_pb2_grpc.HealthServicer):
 
 
 async def serve():
-    """Start the gRPC server."""
+    """Starts the gRPC server."""
     # Load configuration
     config = ServiceConfig()
     
@@ -604,7 +604,13 @@ async def serve():
     logger = logging.getLogger(__name__)
     
     # Create gRPC server
-    server = grpc.aio.server(futures.ThreadPoolExecutor(max_workers=config.max_workers))
+    server = grpc.aio.server(
+        futures.ThreadPoolExecutor(max_workers=config.max_workers),
+        options=[
+            ('grpc.max_receive_message_length', -1),
+            ('grpc.max_send_message_length', -1)
+        ]
+    )
     
     # Add servicers
     execution_pb2_grpc.add_RemoteExecutionServiceServicer_to_server(
