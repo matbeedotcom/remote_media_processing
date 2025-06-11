@@ -45,6 +45,7 @@ class AudioAndTextStreamer:
         self.multibyte_fix = 0
 
     def put(self, value):
+        print(f"AudioAndTextStreamer.put: value={value}")
         if value.dtype == torch.long: # These are text tokens
             if not self.text_started:
                 self.text_started = True

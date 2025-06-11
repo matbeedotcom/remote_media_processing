@@ -34,7 +34,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from remotemedia.core.node import RemoteExecutorConfig
 from remotemedia.core.pipeline import Pipeline
 from remotemedia.nodes.ml import Qwen2_5OmniNode
-from remotemedia.nodes.source import MediaReaderNode, VideoTrackSource
+from remotemedia.nodes.source import MediaReaderNode, VideoTrackSource, AudioTrackSource
 
 # Configure basic logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -89,11 +89,8 @@ async def main():
         path="/Users/mathieugosbee/dev/originals/remote_media_processing/examples/BigBuckBunny_320x180-trim.mp4"
     ))
     
-    # This node extracts the video frames from the stream
-    pipeline.add_node(VideoTrackSource())
-    
-    # This node extracts the audio from the stream
-    pipeline.add_node(AudioTrackSource())
+    # This node now extracts both video and audio frames from the stream
+    pipeline.add_node(VideoTrackSource(output_format="both"))
 
     # The Qwen node is executed remotely, receiving the stream of video frames
     pipeline.add_node(remote_config(local_qwen_instance))

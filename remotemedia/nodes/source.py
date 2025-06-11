@@ -10,6 +10,7 @@ import os
 from typing import AsyncGenerator, Any
 
 import numpy as np
+import av
 from av import AudioFrame, VideoFrame
 from av.frame import Frame
 
@@ -136,6 +137,10 @@ class AudioTrackSource(TrackSource):
     _track_type = "audio"
     _frame_type = AudioFrame
 
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.is_streaming = True
+
     def _process_frame(self, frame: AudioFrame) -> Any:
         """
         Converts an `av.AudioFrame` to a tuple of (audio_data, sample_rate).
@@ -172,16 +177,17 @@ class VideoTrackSource(TrackSource):
     _track_type = "video"
     _frame_type = VideoFrame
 
-    def __init__(self, output_format: str = "bgr24", **kwargs):
+    def __init__(self, output_format: str = "video", **kwargs):
         """
         Initializes the VideoTrackSource node.
 
         Args:
-            output_format (str): The desired output format for the NumPy array
-                                 (e.g., 'bgr24', 'rgb24').
+            output_format (str): 'video' to output only video frames, 
+                                 'both' to output video and audio frames.
         """
         super().__init__(**kwargs)
         self.output_format = output_format
+        self.is_streaming = True
 
     def _process_frame(self, frame: VideoFrame) -> Any:
         """
@@ -203,6 +209,18 @@ class VideoTrackSource(TrackSource):
         except Exception as e:
             logger.error(f"Error converting video frame to numpy array: {e}")
             return None
+
+    async def process(self, data_stream: AsyncGenerator[Any, None]) -> AsyncGenerator[Any, None]:
+        async for packet in data_stream:
+            if not isinstance(packet, av.Packet):
+                continue
+
+            if packet.stream.type == 'video':
+                for frame in packet.decode():
+                    yield frame
+            elif self.output_format == 'both' and packet.stream.type == 'audio':
+                for frame in packet.decode():
+                    yield frame
 
 
 class LocalMediaReaderNode(Node):
