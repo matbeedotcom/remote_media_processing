@@ -180,16 +180,21 @@ class Qwen2_5OmniNode(Node):
                     yield result
                 self.video_buffer.clear()
                 self.audio_buffer.clear()
+        
+        # After the stream is exhausted, process any remaining buffered data.
+        if self.video_buffer or self.audio_buffer:
+            self.logger.info("Processing final buffer segment at end of stream.")
+            result = await self._run_inference()
+            if result:
+                yield result
+            self.video_buffer.clear()
+            self.audio_buffer.clear()
 
     async def cleanup(self) -> None:
-        if self.video_buffer or self.audio_buffer:
-            self.logger.info("Flushing remaining media buffers during cleanup...")
-            await self._run_inference() # Result is not yielded here
-        
+        self.logger.info(f"Cleaning up node '{self.name}'.")
         self.video_buffer.clear()
         self.audio_buffer.clear()
         
-        logger.info(f"Cleaning up node '{self.name}'.")
         del self.model
         del self.processor
         self.model = None
