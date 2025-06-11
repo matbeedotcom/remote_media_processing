@@ -172,8 +172,10 @@ class Qwen2_5OmniNode(Node):
             if isinstance(data, av.VideoFrame):
                 self.video_buffer.append(data.to_ndarray(format='rgb24'))
             elif isinstance(data, np.ndarray):
+                # This is the likely type for video frames after network serialization
                 self.video_buffer.append(data)
             elif isinstance(data, av.AudioFrame):
+                # Audio frames should be handled correctly now
                 resampled_chunk = librosa.resample(
                     data.to_ndarray().astype(np.float32).mean(axis=0),  # aac is stereo
                     orig_sr=data.sample_rate,
