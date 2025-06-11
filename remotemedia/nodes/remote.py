@@ -100,33 +100,60 @@ class RemoteObjectExecutionNode(Node):
         self.remote_config = remote_config
         self.node_config = node_config or {}
         self.client: Optional[RemoteExecutionClient] = None
+        self.session_id: Optional[str] = None
         self.is_streaming = getattr(self.obj_to_execute, 'is_streaming', False)
 
     async def initialize(self):
-        """Initializes the remote execution client."""
+        """
+        Initializes the remote object by sending it to the server, having it
+        initialized there, and establishing a session.
+        """
         await super().initialize()
         self.client = RemoteExecutionClient(self.remote_config)
         await self.client.connect()
 
+        logger.info(f"Initializing remote object for node '{self.name}'...")
+        response = await self.client.execute_object_method(
+            obj=self.obj_to_execute,
+            method_name='initialize',
+            method_args=[]
+        )
+        self.session_id = response.get('session_id')
+        if not self.session_id:
+            raise NodeError("Failed to get a session ID for the remote object.")
+        logger.info(f"Remote object for '{self.name}' initialized with session ID: {self.session_id}")
+
     async def cleanup(self):
-        """Disconnects the remote execution client."""
+        """Disconnects the remote execution client and cleans up the remote session."""
+        if self.client and self.session_id:
+            logger.info(f"Cleaning up remote session {self.session_id} for node '{self.name}'...")
+            try:
+                await self.client.execute_object_method(
+                    obj=self.obj_to_execute, # obj is not used, but required by method
+                    session_id=self.session_id,
+                    method_name='cleanup',
+                    method_args=[]
+                )
+            except Exception as e:
+                self.logger.error(f"Failed to cleanly close remote session {self.session_id}: {e}")
+
         if self.client:
             await self.client.disconnect()
             self.client = None
+        self.session_id = None
         await super().cleanup()
 
     async def process(self, data: Any) -> AsyncGenerator[Any, None]:
         """
-        Processes data by sending it to the remote object.
-        Handles both streaming and non-streaming cases.
+        Processes data by streaming it to the remote object session.
         """
-        if not self.client:
-            raise NodeError("Remote client not initialized.")
+        if not self.client or not self.session_id:
+            raise NodeError("Remote object session not initialized.")
         
         if self.is_streaming:
             try:
                 async for result in self.client.stream_object(
-                    obj=self.obj_to_execute,
+                    session_id=self.session_id,
                     config=self.node_config,
                     input_stream=data
                 ):
@@ -135,19 +162,9 @@ class RemoteObjectExecutionNode(Node):
                 self.logger.error(f"Error streaming object remotely: {e}", exc_info=True)
                 raise NodeError("Remote object stream failed") from e
         else:
-            # Non-streaming case: process a single item
-            try:
-                # We need a new client method for single-item execution
-                # For now, let's assume it exists and is called `execute_object_method`
-                result = await self.client.execute_object_method(
-                    obj=self.obj_to_execute,
-                    method_name='process',
-                    method_args=[data]
-                )
-                yield result
-            except Exception as e:
-                self.logger.error(f"Error executing object method remotely: {e}")
-                raise NodeError("Remote object execution failed") from e
+            # Non-streaming case is not fully supported in this flow,
+            # as it would require re-initializing for each call.
+            raise NotImplementedError("Non-streaming remote object execution is not supported with this session-based approach.")
 
     def __repr__(self) -> str:
         """String representation of the node."""

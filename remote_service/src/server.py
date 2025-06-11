@@ -283,72 +283,90 @@ class RemoteExecutionServicer(execution_pb2_grpc.RemoteExecutionServiceServicer)
 
             init_request = init_request_data.init
             
-            code_root = None
-            try:
-                # Create a temporary directory to act as a sandbox
-                sandbox_path = tempfile.mkdtemp(prefix="remotemedia_")
-                
-                # Extract the code package
-                with io.BytesIO(init_request.code_package) as bio:
-                    with zipfile.ZipFile(bio, 'r') as zf:
-                        zf.extractall(sandbox_path)
-                
-                # Add the code path to sys.path
-                code_root = os.path.join(sandbox_path, "code")
-                sys.path.insert(0, code_root)
-                
-                # Load the serialized object
-                object_pkl_path = os.path.join(sandbox_path, "serialized_object.pkl")
-                with open(object_pkl_path, 'r') as f:
-                    encoded_obj = f.read()
-                
-                decoded_obj = base64.b64decode(encoded_obj)
-                obj = cloudpickle.loads(decoded_obj)
-
-            except Exception as e:
-                self.logger.error(f"Failed to deserialize object: {e}")
-                yield execution_pb2.StreamObjectResponse(error=f"Failed to deserialize object: {e}")
+            # If a session ID is provided, use the existing object
+            session_id = init_request.session_id
+            if session_id and session_id in self.object_sessions:
+                self.logger.info(f"StreamObject: Using existing object from session {session_id}")
+                obj = self.object_sessions[session_id]['object']
+            elif session_id:
+                self.logger.error(f"StreamObject error: Session ID {session_id} not found.")
+                yield execution_pb2.StreamObjectResponse(error=f"Session ID {session_id} not found.")
                 return
+            else:
+                # No session ID, create a temporary object for this stream
+                self.logger.info("StreamObject: No session ID, creating temporary object.")
+                try:
+                    # Create a temporary directory to act as a sandbox
+                    sandbox_path = tempfile.mkdtemp(prefix="remotemedia_")
+                    
+                    # Extract the code package
+                    with io.BytesIO(init_request.code_package) as bio:
+                        with zipfile.ZipFile(bio, 'r') as zf:
+                            zf.extractall(sandbox_path)
+                    
+                    # Add the code path to sys.path
+                    code_root = os.path.join(sandbox_path, "code")
+                    sys.path.insert(0, code_root)
+                    
+                    # Load the serialized object
+                    object_pkl_path = os.path.join(sandbox_path, "serialized_object.pkl")
+                    with open(object_pkl_path, 'r') as f:
+                        encoded_obj = f.read()
+                    
+                    decoded_obj = base64.b64decode(encoded_obj)
+                    obj = cloudpickle.loads(decoded_obj)
+
+                except Exception as e:
+                    self.logger.error(f"Failed to deserialize object: {e}")
+                    yield execution_pb2.StreamObjectResponse(error=f"Failed to deserialize object: {e}")
+                    return
 
             # Check for required methods
-            if not hasattr(obj, 'initialize') or not hasattr(obj, 'process') or not hasattr(obj, 'cleanup'):
-                 yield execution_pb2.StreamObjectResponse(error="Serialized object must have initialize, process, and cleanup methods.")
+            if not hasattr(obj, 'process'):
+                 self.logger.error("StreamObject error: object is missing process method.")
+                 yield execution_pb2.StreamObjectResponse(error="Serialized object must have a process method.")
                  return
 
-            # Initialization is now handled lazily by the node's process method
-            # to avoid race conditions with the client stream.
-            # await obj.initialize()
+            self.logger.info(f"StreamObject: Successfully got object of type {type(obj).__name__}.")
 
+            # Initialization is now handled by the client's initialize() call.
             serialization_format = init_request.serialization_format
             if serialization_format == 'pickle':
                 serializer = PickleSerializer()
             elif serialization_format == 'json':
                 serializer = JSONSerializer()
             else:
+                 self.logger.error(f"StreamObject error: unsupported serialization format '{serialization_format}'.")
                  yield execution_pb2.StreamObjectResponse(error=f"Unsupported serialization format: {serialization_format}")
                  return
 
             async def input_stream_generator():
+                self.logger.info("StreamObject: Starting input stream processing.")
                 chunk_count = 0
                 async for req in request_iterator:
                     if req.HasField("data"):
                         chunk_count += 1
                         self.logger.debug(f"Server: Received chunk {chunk_count} for remote object.")
                         yield serializer.deserialize(req.data)
+                self.logger.info(f"StreamObject: Input stream finished after {chunk_count} chunks.")
 
             # Pass the async generator directly to the process method
+            self.logger.info("StreamObject: Calling process() on remote object.")
             async for result in obj.process(input_stream_generator()):
+                self.logger.debug("StreamObject: Sending result chunk to client.")
                 serialized_result = serializer.serialize(result)
                 yield execution_pb2.StreamObjectResponse(data=serialized_result)
+            self.logger.info("StreamObject: process() method finished.")
 
         except Exception as e:
-            self.logger.error(f"Error during StreamObject execution with object type {type(obj).__name__}: {e}")
+            self.logger.error(f"Error during StreamObject execution with object type {type(obj).__name__ if obj else 'Unknown'}: {e}", exc_info=True)
             yield execution_pb2.StreamObjectResponse(error=f"Error during execution: {e}")
         finally:
-            if obj and hasattr(obj, 'cleanup'):
+            # Only cleanup if the object was temporary (no session_id)
+            if not session_id and obj and hasattr(obj, 'cleanup'):
                 await obj.cleanup()
             
-            # Clean up sandbox
+            # Clean up sandbox if it was created
             if sandbox_path:
                 code_root = os.path.join(sandbox_path, "code")
                 if code_root in sys.path:

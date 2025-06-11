@@ -236,13 +236,15 @@ class RemoteExecutionClient:
     
     async def stream_object(
         self,
-        obj: Any,
         config: Dict[str, Any],
         input_stream: AsyncGenerator[Any, None],
-        serialization_format: str = "pickle"
+        serialization_format: str = "pickle",
+        obj: Optional[Any] = None,
+        session_id: Optional[str] = None,
     ) -> AsyncGenerator[Any, None]:
         """
         Execute a serialized object with a streaming input/output.
+        Can either create a new object or stream to an existing one via session_id.
         """
         if not self.stub:
             raise RemoteExecutionError("Not connected to remote service")
@@ -252,23 +254,24 @@ class RemoteExecutionClient:
             raise ValueError(f"Unknown serialization format: {serialization_format}")
 
         string_config = {k: str(v) for k, v in config.items()}
-        
-        # Package the object and its dependencies
-        packager = CodePackager()
-        code_package = packager.package_object(obj)
 
         async def request_generator():
-            init_message = execution_pb2.StreamObjectInit(
-                code_package=code_package,
-                config=string_config,
-                serialization_format=serialization_format
-            )
+            init_kwargs = {
+                "config": string_config,
+                "serialization_format": serialization_format,
+            }
+            if session_id:
+                init_kwargs["session_id"] = session_id
+            elif obj is not None:
+                packager = CodePackager()
+                init_kwargs["code_package"] = packager.package_object(obj)
+            else:
+                raise ValueError("Either obj or session_id must be provided.")
+
+            init_message = execution_pb2.StreamObjectInit(**init_kwargs)
             yield execution_pb2.StreamObjectRequest(init=init_message)
 
-            chunk_count = 0
             async for item in input_stream:
-                chunk_count += 1
-                logger.debug(f"Client: Sending chunk {chunk_count} to remote object.")
                 serialized_data, _ = serializer.serialize(item)
                 yield execution_pb2.StreamObjectRequest(data=serialized_data)
 

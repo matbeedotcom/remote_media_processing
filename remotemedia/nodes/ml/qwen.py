@@ -171,12 +171,13 @@ class Qwen2_5OmniNode(Node):
         async for item in data_stream:
             # This node expects dictionaries from MediaReaderNode
             if not isinstance(item, dict):
+                self.logger.warning(f"Qwen node received non-dict item, skipping. Got {type(item)}")
                 continue
 
             if 'video' in item and isinstance(item['video'], av.VideoFrame):
                 frame = item['video']
                 self.video_buffer.append(frame.to_ndarray(format='rgb24'))
-                self.logger.debug(f"Buffered video frame with pts {frame.pts}")
+                self.logger.info(f"QwenNode: Buffered video frame #{len(self.video_buffer)}.")
 
             elif 'audio' in item and isinstance(item['audio'], av.AudioFrame):
                 frame = item['audio']
@@ -187,7 +188,7 @@ class Qwen2_5OmniNode(Node):
                     target_sr=self.audio_sample_rate
                 )
                 self.audio_buffer.append(resampled_chunk)
-                self.logger.debug(f"Buffered audio frame with pts {frame.pts}")
+                self.logger.info(f"QwenNode: Buffered audio chunk #{len(self.audio_buffer)}.")
 
             # Check if video buffer is full enough to trigger processing
             if len(self.video_buffer) >= self.video_buffer_max_frames:
