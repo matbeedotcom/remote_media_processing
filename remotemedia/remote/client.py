@@ -266,10 +266,13 @@ class RemoteExecutionClient:
 
             # Then, stream the data chunks.
             logger.debug("Starting to stream data chunks")
+            chunk_count = 0
             async for data_chunk in input_stream:
                 serialized_data = pickle.dumps(data_chunk)
                 yield execution_pb2.StreamObjectRequest(data=serialized_data)
-            logger.debug("Finished streaming data chunks")
+                chunk_count += 1
+                logger.debug(f"Sent data chunk {chunk_count}")
+            logger.debug(f"Finished streaming data chunks. Total sent: {chunk_count}")
 
         logger.debug(f"Streaming object '{obj_to_execute.__class__.__name__}' to remote for execution.")
         

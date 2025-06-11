@@ -163,7 +163,9 @@ class Qwen2_5OmniNode(Node):
             return await asyncio.to_thread(_inference_thread)
 
     async def process(self, data_stream: AsyncGenerator[Any, None]) -> AsyncGenerator[Any, None]:
+        self.logger.info("Qwen process method started.")
         async for data in data_stream:
+            self.logger.debug(f"Qwen received data of type: {type(data)}")
             if isinstance(data, av.VideoFrame):
                 self.video_buffer.append(data.to_ndarray(format='rgb24'))
             elif isinstance(data, av.AudioFrame):
@@ -175,6 +177,7 @@ class Qwen2_5OmniNode(Node):
                 self.audio_buffer.append(resampled_chunk)
 
             if len(self.video_buffer) >= self.video_buffer_max_frames:
+                self.logger.info(f"Buffer full ({len(self.video_buffer)} frames). Running inference...")
                 result = await self._run_inference()
                 if result:
                     yield result
@@ -183,7 +186,7 @@ class Qwen2_5OmniNode(Node):
         
         # After the stream is exhausted, process any remaining buffered data.
         if self.video_buffer or self.audio_buffer:
-            self.logger.info("Processing final buffer segment at end of stream.")
+            self.logger.info(f"Processing final buffer segment at end of stream ({len(self.video_buffer)} video frames, {len(self.audio_buffer)} audio chunks).")
             result = await self._run_inference()
             if result:
                 yield result
