@@ -215,7 +215,7 @@ class Qwen2_5OmniNode(Node):
 
             def generation_thread():
                 try:
-                    self.logger.info("Generation thread started.")
+                    self.logger.info(f"Qwen2_5OmniNode._run_inference: Generation thread started. inputs={inputs}, generate_kwargs={generate_kwargs}")
                     # When using a streamer, the generate function does not return values.
                     # All output is routed through the streamer.
                     self.model.generate(**inputs, streamer=streamer, **generate_kwargs)
