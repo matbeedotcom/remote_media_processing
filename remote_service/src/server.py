@@ -277,15 +277,15 @@ class RemoteExecutionServicer(execution_pb2_grpc.RemoteExecutionServiceServicer)
         
         try:
             # First message is initialization
-            init_request_data = await request_iterator.__anext__()
-            if not init_request_data.HasField("init"):
+            init_request = await context.read()
+            if not init_request.HasField("init"):
                 yield execution_pb2.StreamObjectResponse(error="Stream must be initialized with a StreamObjectInit message.")
                 return
 
-            init_request = init_request_data.init
+            init_request_data = init_request.init
             
             # If a session ID is provided, use the existing object
-            session_id = init_request.session_id
+            session_id = init_request_data.session_id
             if session_id and session_id in self.object_sessions:
                 self.logger.info(f"StreamObject: Using existing object from session {session_id}")
                 obj = self.object_sessions[session_id]['object']
@@ -301,7 +301,7 @@ class RemoteExecutionServicer(execution_pb2_grpc.RemoteExecutionServiceServicer)
                     sandbox_path = tempfile.mkdtemp(prefix="remotemedia_")
                     
                     # Extract the code package
-                    with io.BytesIO(init_request.code_package) as bio:
+                    with io.BytesIO(init_request_data.code_package) as bio:
                         with zipfile.ZipFile(bio, 'r') as zf:
                             zf.extractall(sandbox_path)
                     
@@ -331,7 +331,7 @@ class RemoteExecutionServicer(execution_pb2_grpc.RemoteExecutionServiceServicer)
             self.logger.info(f"StreamObject: Successfully got object of type {type(obj).__name__}.")
 
             # Initialization is now handled by the client's initialize() call.
-            serialization_format = init_request.serialization_format
+            serialization_format = init_request_data.serialization_format
             if serialization_format == 'pickle':
                 serializer = PickleSerializer()
             elif serialization_format == 'json':

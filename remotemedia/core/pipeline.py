@@ -242,32 +242,42 @@ class Pipeline:
 
         async def _streaming_worker(node: Node, in_queue: asyncio.Queue, out_queue: asyncio.Queue):
             self.logger.info(f"STREAMING-WORKER-START: '{node.name}'")
+            
+            # Create a secondary queue to act as a buffer and signaling mechanism
+            internal_queue = asyncio.Queue(1)
+            
+            async def feeder():
+                """Task to feed the internal queue from the main input queue."""
+                while True:
+                    item = await in_queue.get()
+                    await internal_queue.put(item)
+                    if item is _SENTINEL:
+                        break
+
+            feeder_task = asyncio.create_task(feeder())
+
             try:
-                # The node's process method will take the input queue and return an async gen
+                # The node's process method will take the input from the internal queue
                 async def in_stream():
                     while True:
-                        item = await in_queue.get()
-                        self.logger.info(f"PIPELINE: '{node.name}' received item for its input stream.")
+                        item = await internal_queue.get()
                         if item is _SENTINEL:
-                            self.logger.info(f"PIPELINE: '{node.name}' detected end of input stream.")
                             break
                         yield item
 
-                # The process method of a streaming node is an async generator
-                # that takes an async generator as input.
                 if inspect.isasyncgenfunction(node.process):
                     async for result in node.process(in_stream()):
                         if result is not None:
-                            self.logger.info(f"STREAMING-WORKER-RESULT: '{node.name}' produced output.")
                             await out_queue.put(result)
-
-                # Signal completion
+                
                 await out_queue.put(_SENTINEL)
 
             except Exception as e:
                 self.logger.error(f"STREAMING-WORKER-ERROR: in '{node.name}': {e}", exc_info=True)
                 await out_queue.put(_SENTINEL)
             finally:
+                if not feeder_task.done():
+                    feeder_task.cancel()
                 self.logger.info(f"STREAMING-WORKER-FINISH: '{node.name}'")
 
         tasks = []
