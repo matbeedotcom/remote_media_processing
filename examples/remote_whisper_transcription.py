@@ -33,8 +33,9 @@ from remotemedia.core.pipeline import Pipeline
 from remotemedia.core.node import RemoteExecutorConfig
 from remotemedia.nodes.source import MediaReaderNode, AudioTrackSource
 from remotemedia.nodes.audio import AudioTransform
-from remotemedia.nodes.remote import RemoteExecutionNode
+from remotemedia.nodes.remote import RemoteExecutionNode, RemoteObjectExecutionNode
 from remotemedia.nodes import PassThroughNode
+from remotemedia.nodes.ml import WhisperTranscriptionNode
 
 # Configure basic logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -62,8 +63,15 @@ async def create_dummy_audio_file(filepath: str, duration_s: int = 10, sample_ra
 
 async def main():
     """
-    Main function to set up and run the remote transcription pipeline.
+    Main function to run the remote Whisper transcription example.
     """
+    import os
+    REMOTE_HOST = os.environ.get("REMOTE_HOST", "127.0.0.1")
+    # This example demonstrates sending a locally-defined `WhisperTranscriptionNode`
+    # instance to a remote server for execution. This is useful for offloading
+    # heavy ML tasks to a machine with more resources (e.g., a GPU).
+
+    # This example uses a pre-existing audio file.
     # 1. Create a dummy audio file for the example
     dummy_audio_path = "examples/transcribe_demo.wav"
     # await create_dummy_audio_file(dummy_audio_path)
@@ -80,17 +88,17 @@ async def main():
     # Whisper expects 16kHz mono audio, so we resample it locally.
     pipeline.add_node(AudioTransform(output_sample_rate=16000, output_channels=1))
 
-    # Configure the remote execution
-    remote_config = RemoteExecutorConfig(host="127.0.0.1", port=50052, ssl_enabled=False)
-    
-    # This node tells the server to run a 'WhisperTranscriptionNode'.
-    # The audio stream from the transformer will be sent to the server.
-    pipeline.add_node(RemoteExecutionNode(
-        node_to_execute="WhisperTranscriptionNode",
-        remote_config=remote_config,
-        # We can pass config to the remote node, e.g., to use a smaller model.
-        # node_config={"model_id": "openai/whisper-tiny.en"}
-    ))
+    # 2. Configure the remote execution node.
+    #    This node takes the `transcription_node` object, sends it to the server,
+    #    and manages the remote execution.
+    #    NOTE: The remote server must be running on the specified host and port.
+    remote_config = RemoteExecutorConfig(host=REMOTE_HOST, port=50052, ssl_enabled=False)
+    transcription_node = WhisperTranscriptionNode()
+    remote_exec_node = RemoteObjectExecutionNode(
+        obj_to_execute=transcription_node,
+        remote_config=remote_config
+    )
+    pipeline.add_node(remote_exec_node)
 
     # Add a simple node to print the transcribed text received from the server
     pipeline.add_node(PrintNode())

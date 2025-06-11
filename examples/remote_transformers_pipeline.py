@@ -38,7 +38,8 @@ from remotemedia.core.pipeline import Pipeline
 from remotemedia.core.node import RemoteExecutorConfig, Node
 from remotemedia.nodes.source import MediaReaderNode, AudioTrackSource
 from remotemedia.nodes.audio import AudioTransform, ExtractAudioDataNode
-from remotemedia.nodes.remote import RemoteExecutionNode
+from remotemedia.nodes.remote import RemoteObjectExecutionNode
+from remotemedia.nodes.ml import TransformersPipelineNode
 
 # Configure basic logging
 logging.basicConfig(
@@ -55,11 +56,16 @@ class PrintOutputNode(Node):
 
 async def main():
     """
-    Main function to set up and run the remote audio classification pipeline.
+    Main function to run the remote transformers pipeline example.
     """
+    REMOTE_HOST = os.environ.get("REMOTE_HOST", "127.0.0.1")
+    # This example demonstrates sending a locally-defined `TransformersPipelineNode`
+    # instance to a remote server for execution. The server will download and
+    # run the model.
+
     # This example uses a pre-existing audio file.
     # A suitable file would be a clear, single-channel WAV.
-    audio_path = "examples/BigBuckBunny_320x180.mp4"
+    audio_path = "sample_audio.wav"
     if not os.path.exists(audio_path):
         logging.error(
             f"Audio file not found: {audio_path}. "
@@ -67,16 +73,21 @@ async def main():
         )
         return
 
-    # 1. Configure the remote execution for a standard `TransformersPipelineNode`.
-    #    The server will instantiate this node with the provided configuration.
-    remote_config = RemoteExecutorConfig(host="127.0.0.1", port=50052, ssl_enabled=False)
-    remote_classifier_node = RemoteExecutionNode(
-        node_to_execute="TransformersPipelineNode",
-        remote_config=remote_config,
-        node_config={
-            "task": "audio-classification",
-            "model": "superb/wav2vec2-base-superb-ks",
-        },
+    # 1. Define the TransformersPipelineNode instance locally.
+    #    This object itself will be serialized and sent to the server.
+    classifier_node = TransformersPipelineNode(
+        task="audio-classification",
+        model="superb/wav2vec2-base-superb-ks",
+    )
+
+    # 2. Configure the remote execution node.
+    #    This node takes the `classifier_node` object, sends it to the server,
+    #    and manages the remote execution.
+    #    NOTE: The remote server must be running on the specified host and port.
+    remote_config = RemoteExecutorConfig(host=REMOTE_HOST, port=50052, ssl_enabled=False)
+    remote_exec_node = RemoteObjectExecutionNode(
+        obj_to_execute=classifier_node,
+        remote_config=remote_config
     )
 
     # 3. Build the pipeline. The first node is the source.
@@ -87,7 +98,7 @@ async def main():
             # Resample to 16kHz mono audio for the classification model
             AudioTransform(output_sample_rate=16000, output_channels=1),
             ExtractAudioDataNode(),
-            remote_classifier_node,
+            remote_exec_node,
             PrintOutputNode(),
         ]
     )
@@ -106,8 +117,8 @@ async def main():
 
 if __name__ == "__main__":
     # Ensure a sample audio file exists for the demo
-    if not os.path.exists("examples/BigBuckBunny_320x180.mp4"):
-        logging.warning("examples/BigBuckBunny_320x180.mp4 not found. Please add it to run the demo")
+    if not os.path.exists("sample_audio.wav"):
+        logging.warning("sample_audio.wav not found. Please add it to run the demo")
     else:
         try:
             asyncio.run(main())

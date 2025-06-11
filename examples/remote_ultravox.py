@@ -39,6 +39,7 @@ from remotemedia.nodes.audio import AudioTransform, ExtractAudioDataNode
 from remotemedia.nodes.remote import RemoteObjectExecutionNode
 from remotemedia.nodes.ml import UltravoxNode
 from remotemedia.nodes import PassThroughNode
+from remotemedia.nodes.ml.ultravox import UltravoxTTS, UltravoxVoiceCloning
 
 # Configure basic logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -71,6 +72,13 @@ async def main():
     """
     Main function to set up and run the remote Ultravox pipeline.
     """
+    REMOTE_HOST = os.environ.get("REMOTE_HOST", "127.0.0.1")
+    # This example demonstrates using the Ultravox models for text-to-speech
+    # and voice cloning, executed on a remote server.
+
+    # --- Text-to-Speech (TTS) ---
+    logging.info("--- Running Remote Ultravox TTS ---")
+
     dummy_audio_path = "ultravox_sample.wav"
     await create_dummy_audio_file(dummy_audio_path)
 
@@ -90,7 +98,7 @@ async def main():
     pipeline.add_node(ExtractAudioDataNode())
 
     # Configure the remote execution
-    remote_config = RemoteExecutorConfig(host="127.0.0.1", port=50052, ssl_enabled=False)
+    remote_config = RemoteExecutorConfig(host=REMOTE_HOST, port=50052, ssl_enabled=False)
     
     # 1. Create an instance of the UltravoxNode locally.
     #    We can configure its parameters just like any other local object.
@@ -117,6 +125,64 @@ async def main():
 
     logging.info("Remote Ultravox pipeline finished.")
     os.remove(dummy_audio_path)
+
+    # --- Voice Cloning ---
+    logging.info("\n--- Running Remote Ultravox Voice Cloning ---")
+
+    # 1. Define the voice cloning node instance locally
+    clone_node = UltravoxVoiceCloning()
+
+    # 2. Configure the remote execution for voice cloning
+    remote_clone_node = RemoteObjectExecutionNode(
+        obj_to_execute=clone_node,
+        remote_config=remote_config  # Re-use the same remote config
+    )
+
+    # 3. Build and run the voice cloning pipeline
+    # NOTE: The reference audio should be a clean recording of a single speaker.
+    # For this example, we'll reuse the dummy audio.
+    reference_audio_path = "ultravox_sample.wav"
+    await create_dummy_audio_file(reference_audio_path)
+
+    cloning_pipeline = Pipeline([
+        MediaReaderNode(path=reference_audio_path),
+        AudioTrackSource(),
+        AudioTransform(output_sample_rate=16000, output_channels=1),
+        ExtractAudioDataNode(),
+        remote_clone_node
+    ])
+
+    logging.info("Starting voice cloning...")
+    async with cloning_pipeline.managed_execution():
+        async for result in cloning_pipeline.process():
+            # The result from the cloning node is the path to the cloned voice file
+            cloned_voice_path = result
+            logging.info(f"Voice cloned successfully. Speaker embedding saved to: {cloned_voice_path}")
+
+            # Now, let's use the cloned voice for TTS
+            logging.info("\n--- Running TTS with Cloned Voice ---")
+
+            tts_with_clone_node = UltravoxTTS(speaker_embedding_path=cloned_voice_path)
+            remote_tts_clone_node = RemoteObjectExecutionNode(
+                obj_to_execute=tts_with_clone_node,
+                remote_config=remote_config
+            )
+
+            tts_pipeline = Pipeline([
+                # The source for TTS is the text we want to speak
+                PassThroughNode(data_to_pass="This text will be spoken with the cloned voice."),
+                remote_tts_clone_node,
+                # In a real application, you would save or play the output audio
+                PrintNode()
+            ])
+
+            async with tts_pipeline.managed_execution():
+                async for _ in tts_pipeline.process():
+                    pass
+
+    # Clean up dummy files
+    if os.path.exists(reference_audio_path):
+        os.remove(reference_audio_path)
 
 
 if __name__ == "__main__":

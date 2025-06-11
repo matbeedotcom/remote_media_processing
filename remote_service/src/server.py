@@ -613,7 +613,7 @@ async def serve():
     health_pb2_grpc.add_HealthServicer_to_server(HealthServicer(), server)
     
     # Configure server
-    listen_addr = f'127.0.0.1:{config.grpc_port}'
+    listen_addr = f'0.0.0.0:{config.grpc_port}'
     server.add_insecure_port(listen_addr)
     
     # Start server

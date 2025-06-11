@@ -31,7 +31,9 @@ async def test_remote_audio_resampling_pipeline(grpc_server, input_rate, output_
     against a live, locally running server.
     """
     # 1. Setup the pipeline with the remote node
-    remote_config = RemoteExecutorConfig(host='127.0.0.1', port=50052, ssl_enabled=False)
+    REMOTE_HOST = os.environ.get("REMOTE_HOST", "127.0.0.1")
+
+    remote_config = RemoteExecutorConfig(host=REMOTE_HOST, port=50052, ssl_enabled=False)
     pipeline = Pipeline()
     pipeline.add_node(AudioBuffer(buffer_size_samples=buffer_size))
     pipeline.add_node(RemoteExecutionNode(

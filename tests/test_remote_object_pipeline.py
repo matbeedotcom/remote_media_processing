@@ -1,10 +1,12 @@
 import pytest
 import asyncio
+import os
 import numpy as np
 
 from remotemedia.core.pipeline import Pipeline
 from remotemedia.core.node import Node, RemoteExecutorConfig
 from remotemedia.nodes.remote import RemoteObjectExecutionNode
+from remotemedia.nodes.misc import PrintNode
 
 
 # This class will be cloudpickled and sent to the server.
@@ -58,7 +60,9 @@ async def test_remote_object_audio_pipeline(grpc_server):
     object for processing.
     """
     # 1. Configuration
-    remote_config = RemoteExecutorConfig(host="127.0.0.1", port=50052, ssl_enabled=False)
+    REMOTE_HOST = os.environ.get("REMOTE_HOST", "127.0.0.1")
+
+    remote_config = RemoteExecutorConfig(host=REMOTE_HOST, port=50052, ssl_enabled=False)
     
     # This object is defined locally and will be sent to the server.
     audio_effect = AudioEchoEffect(
@@ -101,4 +105,42 @@ async def test_remote_object_audio_pipeline(grpc_server):
     
     first_chunk = output_chunks[0]
     assert first_chunk.shape[0] == 1, "Output should have 1 channel"
-    assert first_chunk.dtype == np.float32, "Output data type should be float32" 
+    assert first_chunk.dtype == np.float32, "Output data type should be float32"
+
+
+async def test_remote_object_pipeline():
+    """
+    Tests a pipeline with a remote object execution node.
+    """
+    REMOTE_HOST = os.environ.get("REMOTE_HOST", "127.0.0.1")
+    # 1. Define the source node for the pipeline
+    source_data = list(range(5))
+    source_node = NumberGeneratorNode(data=source_data)
+
+    # 2. Define the object to be executed remotely
+    # 3. Configure the remote execution node
+    #    This node will serialize the `add_one_node` object and send it to the
+    #    remote server, which will then execute its `process` method.
+    #    NOTE: The remote server must be running on the specified host and port.
+    remote_config = RemoteExecutorConfig(host=REMOTE_HOST, port=50052, ssl_enabled=False)
+    remote_add_one_node = RemoteObjectExecutionNode(
+        obj_to_execute=add_one_node,
+        remote_config=remote_config
+    )
+
+    # 4. Setup the pipeline
+    pipeline = Pipeline(name="RemoteAddOneTestPipeline")
+    pipeline.add_node(source_node)
+    pipeline.add_node(remote_add_one_node)
+
+    # 5. Process the stream
+    input_stream = source_node.process(source_data)
+    output_stream = pipeline.process(input_stream)
+    
+    # 6. Verify the output
+    output_data = []
+    async with pipeline.managed_execution():
+        async for result in output_stream:
+            output_data.append(result[0])
+            
+    assert output_data == [1, 2, 3, 4, 5], "Output data should be [1, 2, 3, 4, 5]" 

@@ -80,6 +80,8 @@ async def test_remote_transformers_pipeline_node(tmp_path):
     port = 50099
     os.environ["GRPC_PORT"] = str(port)
     server_task = None
+    
+    REMOTE_HOST = os.environ.get("REMOTE_HOST", "127.0.0.1")
 
     try:
         # Run the server in the background
@@ -90,7 +92,7 @@ async def test_remote_transformers_pipeline_node(tmp_path):
         # Create a client to connect to the server
         remote_exec_node = RemoteObjectExecutionNode(
             obj_to_execute=classifier_object,
-            remote_config=RemoteExecutorConfig(host="127.0.0.1", port=port, ssl_enabled=False)
+            remote_config=RemoteExecutorConfig(host=REMOTE_HOST, port=port, ssl_enabled=False)
         )
 
         # The remote node also needs to be initialized
