@@ -56,7 +56,7 @@ async def main():
     pipeline = Pipeline()
 
     # The MediaReaderNode will provide the initial stream of audio chunks
-    pipeline.add_node(MediaReaderNode(file_path=dummy_audio_path, chunk_size=4096))
+    pipeline.add_node(MediaReaderNode(path="examples/BigBuckBunny_320x180.mp4", chunk_size=4096))
 
     # Whisper expects 16kHz audio, so we resample it.
     pipeline.add_node(AudioResampler(target_sample_rate=16000))
@@ -70,12 +70,9 @@ async def main():
     # 3. Run the pipeline
     logging.info("Starting transcription pipeline...")
     async with pipeline.managed_execution():
-        # The pipeline runs via the context manager.
-        # We just need to wait for it to complete.
-        # In a real app, you might do other things here.
-        await asyncio.sleep(1) # Give it a moment to start processing
-        while pipeline.is_running():
-            await asyncio.sleep(0.5)
+        async for _ in pipeline.process():
+            # The pipeline runs as we consume its output stream.
+            pass
 
     logging.info("Transcription pipeline finished.")
     os.remove(dummy_audio_path)

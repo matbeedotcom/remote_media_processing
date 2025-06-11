@@ -31,21 +31,21 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from remotemedia.core.pipeline import Pipeline
 from remotemedia.core.node import RemoteExecutorConfig
-from remotemedia.nodes.source import MediaReaderNode
-from remotemedia.nodes.audio import AudioResampler
+from remotemedia.nodes.source import MediaReaderNode, AudioTrackSource
+from remotemedia.nodes.audio import AudioTransform
 from remotemedia.nodes.remote import RemoteExecutionNode
-from remotemedia.nodes.transform import PassThrough
+from remotemedia.nodes import PassThroughNode
 
 # Configure basic logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 
-class PrintNode(PassThrough):
+class PrintNode(PassThroughNode):
     """A simple node that prints any data it receives."""
-    async def process(self, data_stream):
-        async for data in data_stream:
-            print(f"REMOTE TRANSCRIPTION: {data[0]}")
-            yield data
+    async def process(self, data):
+        # The data from the remote whisper node is a tuple, e.g., ('some text',)
+        print(f"REMOTE TRANSCRIPTION: {data[0]}")
+        yield data
 
 
 async def create_dummy_audio_file(filepath: str, duration_s: int = 10, sample_rate: int = 44100):
@@ -65,23 +65,26 @@ async def main():
     Main function to set up and run the remote transcription pipeline.
     """
     # 1. Create a dummy audio file for the example
-    dummy_audio_path = "sample_audio.wav"
-    await create_dummy_audio_file(dummy_audio_path)
+    dummy_audio_path = "examples/transcribe_demo.wav"
+    # await create_dummy_audio_file(dummy_audio_path)
 
     # 2. Create and configure the pipeline
     pipeline = Pipeline()
 
     # The MediaReaderNode will provide the initial stream of audio chunks locally
-    pipeline.add_node(MediaReaderNode(file_path=dummy_audio_path, chunk_size=4096))
+    pipeline.add_node(MediaReaderNode(path=dummy_audio_path, chunk_size=4096))
 
-    # Whisper expects 16kHz audio, so we resample it locally.
-    pipeline.add_node(AudioResampler(target_sample_rate=16000))
+    # Convert av.AudioFrame objects into (ndarray, sample_rate) tuples
+    pipeline.add_node(AudioTrackSource())
+
+    # Whisper expects 16kHz mono audio, so we resample it locally.
+    pipeline.add_node(AudioTransform(output_sample_rate=16000, output_channels=1))
 
     # Configure the remote execution
     remote_config = RemoteExecutorConfig(host="127.0.0.1", port=50052, ssl_enabled=False)
     
     # This node tells the server to run a 'WhisperTranscriptionNode'.
-    # The audio stream from the resampler will be sent to the server.
+    # The audio stream from the transformer will be sent to the server.
     pipeline.add_node(RemoteExecutionNode(
         node_to_execute="WhisperTranscriptionNode",
         remote_config=remote_config,
@@ -95,12 +98,11 @@ async def main():
     # 3. Run the pipeline
     logging.info("Starting remote transcription pipeline...")
     async with pipeline.managed_execution():
-        await asyncio.sleep(1) 
-        while pipeline.is_running():
-            await asyncio.sleep(0.5)
+        async for _ in pipeline.process():
+            # The pipeline runs as we consume its output stream.
+            pass
 
     logging.info("Remote transcription pipeline finished.")
-    os.remove(dummy_audio_path)
 
 
 if __name__ == "__main__":

@@ -34,17 +34,17 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from remotemedia.core.pipeline import Pipeline
 from remotemedia.core.node import RemoteExecutorConfig
-from remotemedia.nodes.source import MediaReaderNode
-from remotemedia.nodes.audio import AudioResampler
+from remotemedia.nodes.source import MediaReaderNode, AudioTrackSource
+from remotemedia.nodes.audio import AudioTransform, ExtractAudioDataNode
 from remotemedia.nodes.remote import RemoteObjectExecutionNode
 from remotemedia.nodes.ml import UltravoxNode
-from remotemedia.nodes.transform import PassThrough
+from remotemedia.nodes import PassThroughNode
 
 # Configure basic logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 
-class PrintNode(PassThrough):
+class PrintNode(PassThroughNode):
     """A simple node that prints any data it receives."""
     async def process(self, data_stream):
         async for data in data_stream:
@@ -77,10 +77,17 @@ async def main():
     pipeline = Pipeline()
 
     # The MediaReaderNode will provide the initial stream of audio chunks locally
-    pipeline.add_node(MediaReaderNode(file_path=dummy_audio_path, chunk_size=4096))
+    pipeline.add_node(MediaReaderNode(path=dummy_audio_path, chunk_size=4096))
+
+    # Convert av.AudioFrame objects into (ndarray, sample_rate) tuples
+    pipeline.add_node(AudioTrackSource())
 
     # Ultravox expects 16kHz audio, so we resample it locally.
-    pipeline.add_node(AudioResampler(target_sample_rate=16000))
+    pipeline.add_node(AudioTransform(output_sample_rate=16000, output_channels=1))
+
+    # Extract the raw audio data (NumPy array) from the AudioFrame object,
+    # as the frame object itself cannot be serialized for remote execution.
+    pipeline.add_node(ExtractAudioDataNode())
 
     # Configure the remote execution
     remote_config = RemoteExecutorConfig(host="127.0.0.1", port=50052, ssl_enabled=False)
@@ -95,7 +102,7 @@ async def main():
     #    The node object is serialized and sent to the server, which then streams
     #    data to and from its `process` method.
     pipeline.add_node(RemoteObjectExecutionNode(
-        object_to_execute=ultravox_instance,
+        obj_to_execute=ultravox_instance,
         remote_config=remote_config
     ))
 
@@ -104,8 +111,9 @@ async def main():
 
     logging.info("Starting remote Ultravox pipeline (via object streaming)...")
     async with pipeline.managed_execution():
-        while pipeline.is_running():
-            await asyncio.sleep(0.5)
+        async for _ in pipeline.process():
+            # The pipeline runs as we consume its output stream.
+            pass
 
     logging.info("Remote Ultravox pipeline finished.")
     os.remove(dummy_audio_path)

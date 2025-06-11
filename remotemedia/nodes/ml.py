@@ -105,13 +105,19 @@ class WhisperTranscriptionNode(Node):
         if not self.transcription_pipeline:
             raise NodeError("Transcription pipeline is not initialized.")
 
-        async for audio_chunk, _ in data_stream:
+        async for data in data_stream:
+            if not isinstance(data, tuple) or len(data) != 2:
+                logger.warning(f"WhisperNode received data of unexpected type or length {type(data)}, skipping.")
+                continue
+            
+            audio_chunk, _ = data
+
             if not isinstance(audio_chunk, np.ndarray):
-                logger.warning(f"Received non-numpy data of type {type(audio_chunk)}, skipping.")
+                logger.warning(f"Received non-numpy audio_chunk of type {type(audio_chunk)}, skipping.")
                 continue
 
-            # Append to buffer
-            self.audio_buffer = np.concatenate([self.audio_buffer, audio_chunk.astype(np.float32)])
+            # Append to buffer, ensuring the chunk is flattened to 1D.
+            self.audio_buffer = np.concatenate([self.audio_buffer, audio_chunk.flatten().astype(np.float32)])
 
             # If buffer is full, transcribe
             while len(self.audio_buffer) >= self.buffer_size:
@@ -157,7 +163,7 @@ class UltravoxNode(Node):
     def __init__(self,
                  model_id: str = "fixie-ai/ultravox-v0_5-llama-3_2-1b",
                  device: Optional[str] = None,
-                 torch_dtype: str = "float16",
+                 torch_dtype: str = "bfloat16",
                  buffer_duration_s: float = 5.0,
                  max_new_tokens: int = 100,
                  system_prompt: str = "You are a friendly and helpful AI assistant.",
@@ -193,14 +199,17 @@ class UltravoxNode(Node):
             self.device = "cuda:0"
         elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
             self.device = "mps"
+            if self._requested_torch_dtype == "bfloat16":
+                self.torch_dtype = torch.bfloat16
         else:
             self.device = "cpu"
 
-        try:
-            resolved_torch_dtype = getattr(torch, self._requested_torch_dtype)
-        except AttributeError:
-            raise NodeError(f"Invalid torch_dtype '{self._requested_torch_dtype}'")
-        self.torch_dtype = resolved_torch_dtype if torch.cuda.is_available() else torch.float32
+        if not self.torch_dtype:
+            try:
+                resolved_torch_dtype = getattr(torch, self._requested_torch_dtype)
+            except AttributeError:
+                raise NodeError(f"Invalid torch_dtype '{self._requested_torch_dtype}'")
+            self.torch_dtype = resolved_torch_dtype if torch.cuda.is_available() else torch.float32
         
         logger.info(f"UltravoxNode configured for model '{self.model_id}' on device '{self.device}'")
         logger.info(f"Initializing Ultravox model '{self.model_id}'...")
@@ -248,12 +257,18 @@ class UltravoxNode(Node):
         if not self.llm_pipeline:
             raise NodeError("Ultravox pipeline is not initialized.")
 
-        async for audio_chunk, _ in data_stream:
-            if not isinstance(audio_chunk, np.ndarray):
-                logger.warning(f"Received non-numpy data of type {type(audio_chunk)}, skipping.")
+        async for data in data_stream:
+            if not isinstance(data, tuple) or len(data) != 2:
+                logger.warning(f"UltravoxNode received data of unexpected type or length {type(data)}, skipping.")
                 continue
 
-            self.audio_buffer = np.concatenate([self.audio_buffer, audio_chunk.astype(np.float32)])
+            audio_chunk, _ = data
+
+            if not isinstance(audio_chunk, np.ndarray):
+                logger.warning(f"Received non-numpy audio_chunk of type {type(audio_chunk)}, skipping.")
+                continue
+
+            self.audio_buffer = np.concatenate([self.audio_buffer, audio_chunk.flatten().astype(np.float32)])
 
             while len(self.audio_buffer) >= self.buffer_size:
                 segment_to_process = self.audio_buffer[:self.buffer_size]

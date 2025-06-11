@@ -133,7 +133,6 @@ class RemoteObjectExecutionNode(Node):
                 # For now, let's assume it exists and is called `execute_object_method`
                 result = await self.client.execute_object_method(
                     obj=self.obj_to_execute,
-                    config=self.node_config,
                     method_name='process',
                     method_args=[data]
                 )

@@ -97,7 +97,8 @@ async def main():
     # The process() method will internally use the MediaReaderNode as the stream source.
     async with pipeline.managed_execution():
         async for _ in pipeline.process():
-            # We just want to exhaust the stream; the PrintOutputNode handles the logging.
+            # The pipeline runs as we consume its output stream.
+            # The PrintOutputNode in the pipeline will display the results.
             pass
 
     logging.info("Pipeline finished.")
