@@ -51,11 +51,12 @@ class AudioAndTextStreamer:
                 self.text_started = True
                 return
 
+            # The value is a tensor of token IDs. We decode it to get the string.
             sub_text = self.tokenizer.decode(value, skip_special_tokens=True)
+            
+            # Handle multibyte characters and whitespace
             if len(sub_text) == 1 and sub_text.isspace():
                 return
-            
-            # Fix for multibyte characters, see https://github.com/huggingface/transformers/pull/28256
             if len(sub_text) > 1 and sub_text.endswith(""):
                  self.multibyte_fix += 1
                  return
