@@ -291,13 +291,20 @@ class RemoteExecutionServicer(execution_pb2_grpc.RemoteExecutionServiceServicer)
 
             # 3. Process the stream of data
             async def input_stream():
+                self.logger.info("input_stream: started")
                 chunk_count = 0
                 async for req in request_iterator:
                     if req.HasField("data"):
                         chunk_count += 1
-                        self.logger.info(f"Received chunk {chunk_count} from client.")
+                        self.logger.info(f"input_stream: Received chunk {chunk_count} from client.")
                         yield pickle.loads(req.data)
-                self.logger.info(f"Finished receiving data from client. Total chunks: {chunk_count}")
+                self.logger.info(f"input_stream: Finished receiving data from client. Total chunks: {chunk_count}")
+
+            # DEBUG: Try to consume the stream directly
+            self.logger.info("DEBUG: Directly consuming input_stream to check for data...")
+            async for _ in input_stream():
+                pass
+            self.logger.info("DEBUG: Finished direct consumption test.")
 
             async for result in obj.process(input_stream()):
                 serialized_result = pickle.dumps(result)
