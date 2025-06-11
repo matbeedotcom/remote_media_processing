@@ -183,7 +183,10 @@ class Qwen2_5OmniNode(Node):
                 self.audio_buffer.clear()
         
         # After the stream is exhausted, process any remaining data in the buffer
-        self.logger.info("Input stream finished. Processing remaining buffer...")
+        self.logger.info(
+            f"Input stream finished. Processing remaining buffer with "
+            f"{len(self.video_buffer)} video frames and {len(self.audio_buffer)} audio chunks."
+        )
         if self.video_buffer or self.audio_buffer:
             result = await self._run_inference()
             if result:
