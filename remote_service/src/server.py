@@ -276,8 +276,8 @@ class RemoteExecutionServicer(execution_pb2_grpc.RemoteExecutionServiceServicer)
         session_id = None
         
         try:
-            # First message is initialization
-            init_request = await context.read()
+            # The first message from the client MUST be the initialization message.
+            init_request = await request_iterator.__anext__()
             if not init_request.HasField("init"):
                 yield execution_pb2.StreamObjectResponse(error="Stream must be initialized with a StreamObjectInit message.")
                 return
