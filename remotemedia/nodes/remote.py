@@ -122,6 +122,7 @@ class RemoteObjectExecutionNode(Node):
         if not self.session_id:
             raise NodeError("Failed to get a session ID for the remote object.")
         logger.info(f"Remote object for '{self.name}' initialized with session ID: {self.session_id}")
+        await asyncio.sleep(0) # Allow context switching
 
     async def cleanup(self):
         """Disconnects the remote execution client and cleans up the remote session."""

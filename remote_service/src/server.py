@@ -273,6 +273,7 @@ class RemoteExecutionServicer(execution_pb2_grpc.RemoteExecutionServiceServicer)
         self.logger.info("New StreamObject connection opened.")
         obj = None
         sandbox_path = None
+        session_id = None
         
         try:
             # First message is initialization
