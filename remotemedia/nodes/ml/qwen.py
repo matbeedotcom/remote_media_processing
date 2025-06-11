@@ -45,7 +45,7 @@ class Qwen2_5OmniNode(Node):
                  video_fps: int = 10,
                  audio_sample_rate: int = 16000,
                  speaker: Optional[str] = None,
-                 use_audio_in_video: bool = True,
+                 use_audio_in_video: bool = False,
                  **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.is_streaming = True
@@ -165,7 +165,7 @@ class Qwen2_5OmniNode(Node):
                 inputs.pop("images", None)
                 inputs.pop("return_tensors", None)
 
-                generate_kwargs = {"use_audio_in_video": use_audio_in_video_flag}
+                generate_kwargs = {}
                 if self.speaker:
                     generate_kwargs["speaker"] = self.speaker
 
