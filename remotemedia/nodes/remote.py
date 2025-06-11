@@ -124,17 +124,11 @@ class RemoteObjectExecutionNode(Node):
             raise NodeError("Remote client not initialized.")
         
         if self.is_streaming:
-            # We need to wrap the input stream to serialize each item before sending.
-            # The remote end will deserialize each item.
-            async def serialized_stream_generator(input_stream: AsyncGenerator[Any, None]):
-                async for item in input_stream:
-                    yield item
-
             try:
                 async for result in self.client.stream_object(
                     obj=self.obj_to_execute,
                     config=self.node_config,
-                    input_stream=serialized_stream_generator(data)
+                    input_stream=data
                 ):
                     yield result
             except Exception as e:
