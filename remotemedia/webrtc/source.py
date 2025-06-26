@@ -83,10 +83,20 @@ class WebRTCStreamSource(Node):
         @self._connection.on("track")
         async def on_track(track: MediaStreamTrack):
             logger.info(f"Track {track.kind} received on node '{self.name}'")
-            relayed_track = self._relay.subscribe(track)
+            logger.info(f"Track ID: {track.id}, Track state: {getattr(track, 'readyState', 'unknown')}")
+            
+            # Try to subscribe to the relay
+            try:
+                relayed_track = self._relay.subscribe(track)
+                logger.info(f"Successfully subscribed to relay for {track.kind} track")
+            except Exception as e:
+                logger.error(f"Failed to subscribe to relay: {e}", exc_info=True)
+                return
+            
             loop = asyncio.get_running_loop()
             task = loop.create_task(self._track_reader(relayed_track))
             self._tasks.append(task)
+            logger.info(f"Created track reader task for {track.kind}")
 
         @self._connection.on("datachannel")
         def on_datachannel(channel: RTCDataChannel):
@@ -127,17 +137,23 @@ class WebRTCStreamSource(Node):
 
     async def _track_reader(self, track: MediaStreamTrack):
         logger.info(f"Starting reader for {track.kind} track on node '{self.name}'.")
+        frame_count = 0
         try:
+            logger.info(f"Track reader entering main loop for {track.kind}")
             while True:
                 try:
+                    logger.debug(f"Waiting for frame from {track.kind} track...")
                     frame = await track.recv()
-                    logger.debug(f"Received {track.kind} frame")
+                    frame_count += 1
+                    logger.info(f"Received {track.kind} frame #{frame_count}")
                     await self._queue.put({track.kind: frame})
-                except MediaStreamError:
-                    logger.info(f"{track.kind} track ended on node '{self.name}'.")
+                    if frame_count == 1:
+                        logger.info(f"First frame received from {track.kind} track!")
+                except MediaStreamError as e:
+                    logger.info(f"{track.kind} track ended on node '{self.name}'. Error: {e}")
                     break
         except asyncio.CancelledError:
-            logger.info(f"{track.kind} track reader for node '{self.name}' cancelled.")
+            logger.info(f"{track.kind} track reader for node '{self.name}' cancelled. Received {frame_count} frames.")
         except Exception as e:
             logger.error(f"Error in {track.kind} track reader for node '{self.name}': {e}", exc_info=True)
 
@@ -157,14 +173,20 @@ class WebRTCStreamSource(Node):
             raise NodeError("WebRTC connection is not set.")
 
         logger.info(f"WebRTC source stream started for node '{self.name}'.")
+        items_yielded = 0
         try:
+            logger.info(f"WebRTCStreamSource entering process loop, queue size: {self._queue.qsize()}")
             while True:
+                logger.debug(f"WebRTCStreamSource waiting for item from queue...")
                 item = await self._queue.get()
                 if item is self._sentinel:
+                    logger.info(f"WebRTCStreamSource received sentinel, breaking")
                     break
+                items_yielded += 1
+                logger.info(f"WebRTCStreamSource yielding item #{items_yielded}: {type(item)}, keys: {item.keys() if isinstance(item, dict) else 'N/A'}")
                 yield item
         except asyncio.CancelledError:
-            logger.info(f"WebRTC source stream cancelled for node '{self.name}'.")
+            logger.info(f"WebRTC source stream cancelled for node '{self.name}'. Yielded {items_yielded} items.")
             raise
         finally:
             logger.info(f"WebRTC source stream finished for node '{self.name}'.")

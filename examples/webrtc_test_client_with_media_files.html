@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <title>WebRTC Test Client with Media Files</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body {
+      font-family: sans-serif;
+      padding: 2em;
+    }
+
+    button {
+      padding: 0.5em 1em;
+      margin: 0.5em 0;
+      font-size: 1em;
+    }
+
+    #status {
+      font-weight: bold;
+    }
+
+    pre {
+      background-color: #eee;
+      padding: 1em;
+      white-space: pre-wrap;
+    }
+
+    video,
+    audio {
+      max-width: 400px;
+      margin: 1em 0;
+      display: block;
+    }
+  </style>
+</head>
+
+<body>
+  <h1>WebRTC Test Client with Media Files</h1>
+
+  <div>
+    <label>Select media file:</label>
+    <select id="mediaSelect" title="Select media file to stream">
+      <option value="/transcribe_demo.wav">Audio: transcribe_demo.wav</option>
+      <option value="/BigBuckBunny_320x180.mp4">Video: BigBuckBunny_320x180.mp4</option>
+      <option value="/draw.mp4">Video: draw.mp4</option>
+    </select>
+  </div>
+
+  <audio id="audioPlayer" controls style="display:none;"></audio>
+  <video id="videoPlayer" controls style="display:none;"></video>
+
+  <button id="start" onclick="start()">Start</button>
+  <button id="stop" onclick="stop()" disabled>Stop</button>
+
+  <h2>Connection Status</h2>
+  <p><span id="status">Not connected</span></p>
+
+  <h2>Server Feedback</h2>
+  <div id="feedback"></div>
+
+  <h2>Logs</h2>
+  <pre id="logs" style="height: 200px; overflow-y: scroll;"></pre>
+
+  <script>
+    let pc = null;
+    let localStream = null;
+    let feedbackChannel = null;
+    const logs = document.getElementById('logs');
+    const status = document.getElementById('status');
+    const feedback = document.getElementById('feedback');
+    const mediaSelect = document.getElementById('mediaSelect');
+    const audioPlayer = document.getElementById('audioPlayer');
+    const videoPlayer = document.getElementById('videoPlayer');
+
+    function log(message) {
+      console.log(message);
+      logs.textContent += message + '\n';
+      logs.scrollTop = logs.scrollHeight;
+    }
+
+    function createPeerConnection() {
+      const config = {
+        sdpSemantics: 'unified-plan',
+        iceServers: [
+          { urls: "stun:stun.l.google.com:19302" }
+        ]
+      };
+      const pc = new RTCPeerConnection(config);
+
+      // Create the feedback data channel from client side
+      feedbackChannel = pc.createDataChannel('feedback', {
+        ordered: true
+      });
+      log('Created data channel: feedback');
+
+      feedbackChannel.addEventListener('open', () => {
+        log('Feedback data channel opened');
+        feedbackChannel.send('client_ready');
+      });
+
+      feedbackChannel.addEventListener('close', () => {
+        log('Feedback data channel closed');
+      });
+
+      feedbackChannel.addEventListener('message', (evt) => {
+        log('Feedback from server: ' + evt.data);
+        const p = document.createElement('p');
+        p.textContent = evt.data;
+        feedback.appendChild(p);
+      });
+
+      pc.addEventListener('track', (evt) => {
+        log('Track received from server: ' + evt.track.kind);
+      });
+
+      // Log ICE gathering state changes
+      pc.addEventListener('icegatheringstatechange', () => {
+        log('ICE gathering state: ' + pc.iceGatheringState);
+      });
+
+      // Log signaling state changes
+      pc.addEventListener('signalingstatechange', () => {
+        log('Signaling state: ' + pc.signalingState);
+      });
+
+      pc.addEventListener('connectionstatechange', () => {
+        log('Connection state change: ' + pc.connectionState);
+        status.textContent = pc.connectionState;
+        if (pc.connectionState === 'connected') {
+          document.getElementById('start').disabled = true;
+          document.getElementById('stop').disabled = false;
+        } else if (['disconnected', 'failed', 'closed'].includes(pc.connectionState)) {
+          stop();
+        }
+      });
+
+      window.pc = pc;
+      return pc;
+    }
+
+    async function start() {
+      log('Starting connection...');
+      document.getElementById('start').disabled = true;
+
+      pc = createPeerConnection();
+
+      try {
+        const mediaFile = mediaSelect.value;
+        const isAudio = mediaFile.endsWith('.wav');
+
+        // Hide both players first
+        audioPlayer.style.display = 'none';
+        videoPlayer.style.display = 'none';
+
+        if (isAudio) {
+          // Load audio file
+          audioPlayer.src = mediaFile;
+          audioPlayer.style.display = 'block';
+          audioPlayer.loop = true; // Loop for continuous testing
+
+          // Wait for audio to load
+          await new Promise((resolve) => {
+            audioPlayer.addEventListener('loadedmetadata', resolve, { once: true });
+          });
+
+          // Capture stream from audio element
+          localStream = audioPlayer.captureStream();
+          log('Captured audio stream from file: ' + mediaFile);
+
+          // Start playing
+          audioPlayer.play();
+        } else {
+          // Load video file
+          videoPlayer.src = mediaFile;
+          videoPlayer.style.display = 'block';
+          videoPlayer.loop = true; // Loop for continuous testing
+          videoPlayer.muted = true; // Mute to avoid feedback
+
+          // Wait for video to load
+          await new Promise((resolve) => {
+            videoPlayer.addEventListener('loadedmetadata', resolve, { once: true });
+          });
+
+          // Capture stream from video element
+          localStream = videoPlayer.captureStream();
+          log('Captured video stream from file: ' + mediaFile);
+
+          // Start playing
+          videoPlayer.play();
+        }
+
+        // Add tracks to peer connection
+        localStream.getTracks().forEach(track => {
+          log('Adding ' + track.kind + ' track to peer connection. Track ID: ' + track.id);
+          log('Track enabled: ' + track.enabled + ', Track state: ' + track.readyState);
+          const sender = pc.addTrack(track, localStream);
+          log('Track added successfully. Sender ID: ' + sender.track.id);
+        });
+
+        // Log the total number of senders
+        log('Total senders: ' + pc.getSenders().length);
+
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+
+        log('Sending offer to server...');
+        const response = await fetch('/offer', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            sdp: pc.localDescription.sdp,
+            type: pc.localDescription.type,
+          }),
+        });
+
+        const answer = await response.json();
+        log('Received answer from server.');
+        await pc.setRemoteDescription(answer);
+
+      } catch (e) {
+        log('Error starting connection: ' + e);
+        stop();
+      }
+    }
+
+    function stop() {
+      log('Stopping connection...');
+
+      // Stop media playback
+      audioPlayer.pause();
+      videoPlayer.pause();
+
+      if (feedbackChannel) {
+        feedbackChannel.close();
+        feedbackChannel = null;
+      }
+      if (pc) {
+        pc.close();
+        pc = null;
+        window.pc = null;
+      }
+      if (localStream) {
+        localStream.getTracks().forEach(track => track.stop());
+        localStream = null;
+      }
+      document.getElementById('start').disabled = false;
+      document.getElementById('stop').disabled = true;
+      status.textContent = 'Not connected';
+      feedback.innerHTML = '';
+    }
+  </script>
+</body>
+
+</html>

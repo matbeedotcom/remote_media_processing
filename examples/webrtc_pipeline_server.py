@@ -33,7 +33,10 @@ ROOT = os.path.dirname(__file__)
 class PrintNode(PassThroughNode):
     """A simple node that prints any data it receives."""
     async def process(self, data):
-        logger.info(f"PIPELINE-SINK: {data}")
+        if isinstance(data, dict) and 'audio' in data:
+            logger.info(f"PrintNode: Received audio frame")
+        else:
+            logger.info(f"PrintNode: Received data type: {type(data)}, keys: {data.keys() if isinstance(data, dict) else 'N/A'}")
         return data
 
 
@@ -71,6 +74,17 @@ class FeedbackSinkNode(PassThroughNode):
 feedback_nodes = {}
 
 
+class DebugAudioTrackSource(AudioTrackSource):
+    """Debug version of AudioTrackSource with extra logging."""
+    def process(self, data):
+        logger.info(f"DebugAudioTrackSource received: {type(data)}, keys: {data.keys() if isinstance(data, dict) else 'N/A'}")
+        # Call parent process (synchronous)
+        result = super().process(data)
+        if result is not None:
+            logger.info(f"DebugAudioTrackSource returning audio data: {type(result)}")
+        return result
+
+
 def create_transcription_pipeline(pc: RTCPeerConnection) -> Pipeline:
     """
     Factory function to create the audio processing pipeline.
@@ -84,12 +98,13 @@ def create_transcription_pipeline(pc: RTCPeerConnection) -> Pipeline:
     # Store it so we can set the channel later
     feedback_nodes[pc] = feedback_node
     
+    # Simpler pipeline without buffering for testing
     pipeline = Pipeline(
         [
             WebRTCStreamSource(),
-            AudioTrackSource(),
-            AudioTransform(output_sample_rate=16000, output_channels=1),
-            ConcatenateAudioNode(duration_seconds=2.0), # Buffer 2s of audio
+            DebugAudioTrackSource(),  # Use debug version
+            AudioBuffer(buffer_size_samples=16000),
+            # AudioTransform(output_sample_rate=16000, output_channels=1),
             PrintNode(),  # Add debug logging
             feedback_node,
         ]
@@ -146,14 +161,30 @@ async def offer_handler(request: web.Request):
             await pipeline.cleanup()
             feedback_nodes.pop(pc, None)
     
+    # Initialize the pipeline BEFORE negotiating to ensure listeners are ready
+    logger.info(f"Initializing pipeline {pipeline}")
+    await pipeline.initialize()
+    
+    # Check if the offer contains audio tracks
+    if "m=audio" in offer_sdp:
+        logger.info("Offer contains audio track")
+    else:
+        logger.warning("Offer does NOT contain audio track!")
+    
     # Set remote description and create answer
     await pc.setRemoteDescription(RTCSessionDescription(sdp=offer_sdp, type=offer_type))
     answer = await pc.createAnswer()
     await pc.setLocalDescription(answer)
     
-    # Start pipeline
-    logger.info(f"Starting pipeline {pipeline}")
-    asyncio.create_task(run_pipeline(pipeline))
+    # Check if answer accepts audio
+    if "m=audio" in answer.sdp:
+        logger.info("Answer accepts audio track")
+    else:
+        logger.warning("Answer does NOT accept audio track!")
+    
+    # Start pipeline processing
+    logger.info(f"Starting pipeline processing for {pipeline}")
+    asyncio.create_task(run_pipeline_processing(pipeline))
     
     return web.json_response({
         "sdp": pc.localDescription.sdp,
@@ -161,15 +192,24 @@ async def offer_handler(request: web.Request):
     })
 
 
-async def run_pipeline(pipeline: Pipeline):
-    """Run the pipeline."""
+async def run_pipeline_processing(pipeline: Pipeline):
+    """Run the pipeline processing (assumes already initialized)."""
     try:
-        async with pipeline.managed_execution():
-            async for _ in pipeline.process():
-                pass
+        logger.info("Starting pipeline processing loop")
+        item_count = 0
+        async for item in pipeline.process():
+            item_count += 1
+            logger.info(f"Pipeline processed item #{item_count}: {type(item)}")
+            if item_count % 10 == 0:  # Log every 10 items
+                logger.info(f"Pipeline processed {item_count} items")
+        logger.info(f"Pipeline processed total {item_count} items")
+    except asyncio.CancelledError:
+        logger.info("Pipeline processing cancelled")
+        raise
     except Exception as e:
         logger.error(f"Error during pipeline execution: {e}", exc_info=True)
     finally:
+        await pipeline.cleanup()
         logger.info("Pipeline execution finished.")
 
 
@@ -177,6 +217,37 @@ async def index(request):
     # Serve the client that creates data channel
     content = open(os.path.join(ROOT, "webrtc_client_with_datachannel.html"), "r").read()
     return web.Response(content_type="text/html", text=content)
+
+
+async def serve_test_client(request):
+    # Serve the test client that uses media files
+    content = open(os.path.join(ROOT, "webrtc_test_client_with_media_files.html"), "r").read()
+    return web.Response(content_type="text/html", text=content)
+
+
+async def serve_media_file(request):
+    """Serve media files for testing."""
+    filename = request.match_info['filename']
+    
+    # Security: only allow specific files
+    allowed_files = ['transcribe_demo.wav', 'BigBuckBunny_320x180.mp4', 'draw.mp4']
+    if filename not in allowed_files:
+        return web.Response(status=404)
+    
+    filepath = os.path.join(ROOT, filename)
+    if not os.path.exists(filepath):
+        return web.Response(status=404)
+    
+    # Determine content type
+    if filename.endswith('.wav'):
+        content_type = 'audio/wav'
+    elif filename.endswith('.mp4'):
+        content_type = 'video/mp4'
+    else:
+        content_type = 'application/octet-stream'
+    
+    # Stream the file
+    return web.FileResponse(filepath, headers={'Content-Type': content_type})
 
 
 async def on_shutdown(app: web.Application):
@@ -191,6 +262,8 @@ def main():
     app = web.Application()
     app.on_shutdown.append(on_shutdown)
     app.router.add_get("/", index)
+    app.router.add_get("/test", serve_test_client)
+    app.router.add_get("/{filename}", serve_media_file)
     app.router.add_post("/offer", offer_handler)
 
     logger.info("Starting aiohttp server on http://127.0.0.1:8899")
