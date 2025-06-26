@@ -94,19 +94,13 @@ extend-exclude = '''
 '''
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
-python_files = ["test_*.py"]
-python_classes = ["Test*"]
-python_functions = ["test_*"]
-asyncio_mode = "auto"
-addopts = [
-    "--strict-markers",
-    "--strict-config",
-    "--verbose",
-    "--cov=remotemedia",
-    "--cov-report=term-missing",
-    "--cov-report=html",
+minversion = "6.0"
+addopts = "-ra -q"
+testpaths = [
+    "tests",
 ]
+asyncio_mode = "auto"
+asyncio_default_test_loop_scope = "session"
 
 [tool.mypy]
 python_version = "3.9"

@@ -1,17 +1,16 @@
 """
-RemoteMedia Processing SDK
-
-A Python SDK for building distributed audio/video/data processing pipelines
-with transparent remote offloading capabilities.
+Remote Media SDK
 """
 
+# Version and author information
 __version__ = "0.1.0"
-__author__ = "RemoteMedia Team"
-__email__ = "team@remotemedia.dev"
+__author__ = "Your Name"
+__email__ = "your.email@example.com"
 
-# Core imports
-from .core.pipeline import Pipeline
-from .core.node import Node, RemoteExecutorConfig
+# Core classes
+from .core import Pipeline, Node, RemoteExecutorConfig
+
+# Exceptions
 from .core.exceptions import (
     RemoteMediaError,
     PipelineError,
@@ -20,19 +19,30 @@ from .core.exceptions import (
     WebRTCError,
 )
 
-# Convenience imports
-from .nodes import *  # noqa: F401, F403
-from .webrtc.manager import WebRTCManager
+# WebRTC components
+from .webrtc import (
+    WebRTCManager,
+    WebRTCServer,
+    WebRTCStreamSource,
+    WebRTCSinkNode,
+    PipelineTrack
+)
+
 
 __all__ = [
     # Core classes
     "Pipeline",
     "Node",
     "RemoteExecutorConfig",
+    # WebRTC components
     "WebRTCManager",
+    "WebRTCServer",
+    "WebRTCStreamSource",
+    "WebRTCSinkNode",
+    "PipelineTrack",
     # Exceptions
     "RemoteMediaError",
-    "PipelineError", 
+    "PipelineError",
     "NodeError",
     "RemoteExecutionError",
     "WebRTCError",

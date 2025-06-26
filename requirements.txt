@@ -11,3 +11,9 @@ aiohttp>=3.8.0
 typing-extensions>=4.5.0
 librosa
 av
+# For ML nodes
+transformers
+torch
+accelerate
+# For remote execution
+dill

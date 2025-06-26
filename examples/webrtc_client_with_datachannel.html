@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <title>Remote Media - WebRTC Pipeline Client with Data Channel</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body {
+      font-family: sans-serif;
+      padding: 2em;
+    }
+
+    button {
+      padding: 0.5em 1em;
+      margin: 0.5em 0;
+      font-size: 1em;
+    }
+
+    #status {
+      font-weight: bold;
+    }
+
+    pre {
+      background-color: #eee;
+      padding: 1em;
+      white-space: pre-wrap;
+    }
+  </style>
+</head>
+
+<body>
+  <h1>WebRTC Pipeline Client</h1>
+  <p>
+    This page connects to the server, sends microphone audio, and displays connection status.
+    The server will process the audio via a pipeline and print output to its console.
+  </p>
+
+  <button id="start" onclick="start()">Start</button>
+  <button id="stop" onclick="stop()" disabled>Stop</button>
+
+  <h2>Connection Status</h2>
+  <p><span id="status">Not connected</span></p>
+
+  <h2>Server Feedback</h2>
+  <div id="feedback"></div>
+
+  <h2>Logs</h2>
+  <pre id="logs" style="height: 200px; overflow-y: scroll;"></pre>
+
+  <script>
+    let pc = null;
+    let localStream = null;
+    let feedbackChannel = null;
+    const logs = document.getElementById('logs');
+    const status = document.getElementById('status');
+    const feedback = document.getElementById('feedback');
+
+    function log(message) {
+      console.log(message);
+      logs.textContent += message + '\n';
+      logs.scrollTop = logs.scrollHeight;
+    }
+
+    function createPeerConnection() {
+      const config = {
+        sdpSemantics: 'unified-plan',
+        iceServers: [
+          { urls: "stun:stun.l.google.com:19302" }
+        ]
+      };
+      const pc = new RTCPeerConnection(config);
+
+      // Create the feedback data channel from client side
+      feedbackChannel = pc.createDataChannel('feedback', {
+        ordered: true
+      });
+      log('Created data channel: feedback');
+
+      feedbackChannel.addEventListener('open', () => {
+        log('Feedback data channel opened');
+        // Send a test message
+        feedbackChannel.send('client_ready');
+      });
+
+      feedbackChannel.addEventListener('close', () => {
+        log('Feedback data channel closed');
+      });
+
+      feedbackChannel.addEventListener('message', (evt) => {
+        log('Feedback from server: ' + evt.data);
+        const p = document.createElement('p');
+        p.textContent = evt.data;
+        feedback.appendChild(p);
+      });
+
+      feedbackChannel.addEventListener('error', (e) => {
+        log('Feedback channel error: ' + e);
+      });
+
+      pc.addEventListener('track', (evt) => {
+        log('Track received from server: ' + evt.track.kind);
+      });
+
+      pc.addEventListener('connectionstatechange', () => {
+        log('Connection state change: ' + pc.connectionState);
+        status.textContent = pc.connectionState;
+        if (pc.connectionState === 'connected') {
+          document.getElementById('start').disabled = true;
+          document.getElementById('stop').disabled = false;
+        } else if (['disconnected', 'failed', 'closed'].includes(pc.connectionState)) {
+          stop();
+        }
+      });
+
+      window.pc = pc;
+
+      return pc;
+    }
+
+    async function start() {
+      log('Starting connection...');
+      document.getElementById('start').disabled = true;
+
+      pc = createPeerConnection();
+
+      try {
+        localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        localStream.getTracks().forEach(track => {
+          log('Adding local audio track to peer connection.');
+          pc.addTrack(track, localStream);
+        });
+
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+
+        log('Sending offer to server...');
+        const response = await fetch('/offer', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            sdp: pc.localDescription.sdp,
+            type: pc.localDescription.type,
+          }),
+        });
+
+        const answer = await response.json();
+        log('Received answer from server.');
+        await pc.setRemoteDescription(answer);
+
+      } catch (e) {
+        log('Error starting connection: ' + e);
+        stop();
+      }
+    }
+
+    function stop() {
+      log('Stopping connection...');
+      if (feedbackChannel) {
+        feedbackChannel.close();
+        feedbackChannel = null;
+      }
+      if (pc) {
+        pc.close();
+        pc = null;
+        window.pc = null;
+      }
+      if (localStream) {
+        localStream.getTracks().forEach(track => track.stop());
+        localStream = null;
+      }
+      document.getElementById('start').disabled = false;
+      document.getElementById('stop').disabled = true;
+      status.textContent = 'Not connected';
+      feedback.innerHTML = '';
+    }
+
+  </script>
+</body>
+
+</html>
