@@ -101,6 +101,8 @@ class FeedbackSinkNode(PassThroughNode):
 
 # Global to store feedback nodes by peer connection
 feedback_nodes = {}
+# Global to store processing tasks by peer connection
+processing_tasks = {}
 
 
 class DebugAudioTrackSource(AudioTrackSource):
@@ -193,6 +195,18 @@ async def offer_handler(request: web.Request):
     async def on_connectionstatechange():
         logger.info(f"Connection state is {pc.connectionState}")
         if pc.connectionState in ("failed", "closed", "disconnected"):
+            # Cancel the processing task if it exists
+            if pc in processing_tasks:
+                task = processing_tasks[pc]
+                if not task.done():
+                    logger.info("Cancelling pipeline processing task")
+                    task.cancel()
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        logger.info("Pipeline processing task cancelled successfully")
+                processing_tasks.pop(pc, None)
+            
             await pipeline.cleanup()
             feedback_nodes.pop(pc, None)
     
@@ -219,7 +233,8 @@ async def offer_handler(request: web.Request):
     
     # Start pipeline processing
     logger.info(f"Starting pipeline processing for {pipeline}")
-    asyncio.create_task(run_pipeline_processing(pipeline))
+    task = asyncio.create_task(run_pipeline_processing(pipeline))
+    processing_tasks[pc] = task
     
     return web.json_response({
         "sdp": pc.localDescription.sdp,
@@ -287,8 +302,18 @@ async def serve_media_file(request):
 
 async def on_shutdown(app: web.Application):
     """aiohttp shutdown handler."""
-    # Clean up any remaining connections
-    pass
+    # Cancel all remaining processing tasks
+    logger.info(f"Shutting down, cancelling {len(processing_tasks)} processing tasks")
+    for pc, task in list(processing_tasks.items()):
+        if not task.done():
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+    processing_tasks.clear()
+    feedback_nodes.clear()
+    logger.info("Shutdown complete")
 
 
 def main():

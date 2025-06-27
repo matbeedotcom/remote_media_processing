@@ -44,6 +44,7 @@ class WhisperTranscriptionNode(Node):
         self.transcription_pipeline = None
         self.device = None
         self.torch_dtype = None
+        self._shutting_down = False  # Flag to indicate cleanup is in progress
 
     async def initialize(self) -> None:
         """
@@ -107,6 +108,11 @@ class WhisperTranscriptionNode(Node):
             raise NodeError("Transcription pipeline is not initialized.")
 
         async for data in data_stream:
+            # Check if we're shutting down
+            if self._shutting_down:
+                logger.info("WhisperTranscriptionNode shutting down, exiting process loop")
+                break
+                
             if not isinstance(data, tuple) or len(data) != 2:
                 logger.warning(f"WhisperNode received data of unexpected type or length {type(data)}, skipping.")
                 continue
@@ -121,11 +127,16 @@ class WhisperTranscriptionNode(Node):
             self.audio_buffer = np.concatenate([self.audio_buffer, audio_chunk.flatten().astype(np.float32)])
 
             # If buffer is full, transcribe
-            while len(self.audio_buffer) >= self.buffer_size:
+            while len(self.audio_buffer) >= self.buffer_size and not self._shutting_down:
                 segment_to_process = self.audio_buffer[:self.buffer_size]
                 self.audio_buffer = self.audio_buffer[self.buffer_size:]
 
                 try:
+                    # Double-check pipeline is still available before using it
+                    if self.transcription_pipeline is None:
+                        logger.warning("Transcription pipeline became None during processing, exiting")
+                        return
+                        
                     logger.info(f"Transcribing {len(segment_to_process) / self.sample_rate:.2f}s of audio...")
                     result = await asyncio.to_thread(self.transcription_pipeline, segment_to_process.copy())
                     transcribed_text = result["text"].strip()
@@ -137,6 +148,12 @@ class WhisperTranscriptionNode(Node):
 
     async def cleanup(self) -> None:
         """Transcribe any remaining audio in the buffer."""
+        # Set shutdown flag first to stop processing
+        self._shutting_down = True
+        
+        # Give a small delay for any ongoing processing to complete
+        await asyncio.sleep(0.1)
+        
         if self.transcription_pipeline and len(self.audio_buffer) > 0:
             logger.info(f"Cleaning up and transcribing remaining {len(self.audio_buffer) / self.sample_rate:.2f}s of audio...")
             try:
@@ -147,6 +164,8 @@ class WhisperTranscriptionNode(Node):
                     # In a real scenario, we might want to push this last result to a final queue
             except Exception as e:
                 logger.error(f"Error during final transcription: {e}")
+        
+        # Clear resources
         self.audio_buffer = np.array([], dtype=np.float32)
         self.transcription_pipeline = None
         self.device = None
