@@ -10,22 +10,34 @@ import sys
 from pathlib import Path
 
 from aiohttp import web
-from aiortc import RTCIceServer, RTCPeerConnection, RTCDataChannel, RTCSessionDescription
+from aiortc import RTCIceServer, RTCPeerConnection, RTCDataChannel, RTCSessionDescription, RTCConfiguration
 
 # Ensure the 'remotemedia' package is in the Python path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from remotemedia.core.pipeline import Pipeline
-from remotemedia.nodes.audio import AudioTransform, ConcatenateAudioNode
+from remotemedia.nodes.audio import AudioTransform, ConcatenateAudioNode, AudioBuffer
 from remotemedia.nodes.source import AudioTrackSource
 from remotemedia.webrtc.source import WebRTCStreamSource
 from remotemedia.webrtc.server import WebRTCServer
 from remotemedia.nodes.base import PassThroughNode
+from remotemedia.nodes.ml import WhisperTranscriptionNode
 
 
 # Configure basic logging
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+logging.basicConfig(
+    level=logging.DEBUG,  # Changed to DEBUG for testing
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.StreamHandler(),  # Console output
+        logging.FileHandler('webrtc_server.log')  # Also log to file
+    ]
+)
 logger = logging.getLogger(__name__)
+
+# Set specific loggers to appropriate levels to reduce noise
+logging.getLogger("aiohttp").setLevel(logging.INFO)
+logging.getLogger("aiortc").setLevel(logging.INFO)
 
 ROOT = os.path.dirname(__file__)
 
@@ -35,6 +47,12 @@ class PrintNode(PassThroughNode):
     async def process(self, data):
         if isinstance(data, dict) and 'audio' in data:
             logger.info(f"PrintNode: Received audio frame")
+        elif isinstance(data, str):
+            # This is likely transcription text from WhisperTranscriptionNode
+            logger.info(f"🎤 TRANSCRIPTION: '{data}'")
+        elif isinstance(data, tuple) and len(data) == 1 and isinstance(data[0], str):
+            # WhisperTranscriptionNode yields (text,) tuples
+            logger.info(f"🎤 TRANSCRIPTION: '{data[0]}'")
         else:
             logger.info(f"PrintNode: Received data type: {type(data)}, keys: {data.keys() if isinstance(data, dict) else 'N/A'}")
         return data
@@ -61,9 +79,20 @@ class FeedbackSinkNode(PassThroughNode):
         logger.info(f"FeedbackSinkNode received data #{self.count}")
         
         if self.channel and self.channel.readyState == "open":
-            msg = f"{self.message}_{self.count}"
-            self.channel.send(msg)
-            logger.info(f"Sent feedback message: {msg}")
+            # Send transcription text if available
+            if isinstance(data, str):
+                msg = f"transcription: {data}"
+                self.channel.send(msg)
+                logger.info(f"Sent transcription: {data}")
+            elif isinstance(data, tuple) and len(data) == 1 and isinstance(data[0], str):
+                # WhisperTranscriptionNode yields (text,) tuples
+                msg = f"transcription: {data[0]}"
+                self.channel.send(msg)
+                logger.info(f"Sent transcription: {data[0]}")
+            else:
+                msg = f"{self.message}_{self.count}"
+                self.channel.send(msg)
+                logger.info(f"Sent feedback message: {msg}")
         else:
             logger.warning(f"Data channel not available or not open")
         
@@ -97,14 +126,17 @@ def create_transcription_pipeline(pc: RTCPeerConnection) -> Pipeline:
     
     # Store it so we can set the channel later
     feedback_nodes[pc] = feedback_node
-    
+    # Convert av.AudioFrame objects into (ndarray, sample_rate) tuples
+    # Whisper expects 16kHz audio, so we resample it.
+
     # Simpler pipeline without buffering for testing
     pipeline = Pipeline(
         [
             WebRTCStreamSource(),
-            DebugAudioTrackSource(),  # Use debug version
+            AudioTrackSource(),  # Use debug version
             AudioBuffer(buffer_size_samples=16000),
-            # AudioTransform(output_sample_rate=16000, output_channels=1),
+            AudioTransform(output_sample_rate=16000, output_channels=1),
+            WhisperTranscriptionNode(),
             PrintNode(),  # Add debug logging
             feedback_node,
         ]
@@ -121,8 +153,11 @@ async def offer_handler(request: web.Request):
     offer_sdp = params["sdp"]
     offer_type = params["type"]
     
-    # Create peer connection
-    pc = RTCPeerConnection()
+    # Create peer connection with ICE servers
+    config = RTCConfiguration(
+        iceServers=[RTCIceServer(urls=["stun:stun.l.google.com:19302"])]
+    )
+    pc = RTCPeerConnection(configuration=config)
     
     # Create pipeline
     pipeline = create_transcription_pipeline(pc)

@@ -116,6 +116,8 @@ remote_service/             # The remote execution gRPC server
 
 - [**Developer Guide**](DEVELOPER_GUIDE.md) - **Start here!** The essential, in-depth guide for building with the SDK.
 - [Development Strategy](DevelopmentStrategyDocument.md) - The original planning and strategy document.
+- [Testing Guide](tests/README.md) - Comprehensive guide to running the test suite.
+- [WebRTC Tests](tests/webrtc/README.md) - Special instructions for WebRTC tests (M1 Mac compatible).
 
 ## Contributing
 
