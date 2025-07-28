@@ -262,7 +262,14 @@ class UltravoxMinDurationWrapper(Node):
         
     async def initialize(self):
         """Initialize the wrapped Ultravox node."""
-        await self.ultravox_node.initialize()
+        if not self.ultravox_node.is_initialized:
+            await self.ultravox_node.initialize()
+        
+    async def flush(self):
+        """Flush the wrapped Ultravox node."""
+        if hasattr(self.ultravox_node, 'flush'):
+            return await self.ultravox_node.flush()
+        return None
         
     async def cleanup(self):
         """Cleanup the wrapped Ultravox node."""

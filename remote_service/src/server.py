@@ -379,6 +379,19 @@ class RemoteExecutionServicer(execution_pb2_grpc.RemoteExecutionServiceServicer)
                     serialized_result = serializer.serialize(result)
                     yield execution_pb2.StreamObjectResponse(data=serialized_result)
                 logger.info("StreamObject: process() method finished.")
+                
+                # After the stream is done, flush the object if possible
+                if hasattr(obj, 'flush') and callable(getattr(obj, 'flush')):
+                    logger.info("StreamObject: Calling flush() on remote object.")
+                    if inspect.iscoroutinefunction(obj.flush):
+                        flushed_result = await obj.flush()
+                    else:
+                        flushed_result = obj.flush()
+                    if flushed_result is not None:
+                        logger.info("StreamObject: Sending flushed result to client.")
+                        serialized_result = serializer.serialize(flushed_result)
+                        yield execution_pb2.StreamObjectResponse(data=serialized_result)
+                
             except Exception as e:
                 logger.error(f"Error during object processing: {e}", exc_info=True)
                 yield execution_pb2.StreamObjectResponse(error=f"Error during processing: {e}")

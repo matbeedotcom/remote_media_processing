@@ -54,6 +54,13 @@ class UltravoxNode(Node):
         """
         Load the model and processor. This runs on the execution environment (local or remote).
         """
+        await super().initialize()
+        
+        # Only initialize if not already done
+        if self.llm_pipeline is not None:
+            logger.info("UltravoxNode already initialized, skipping.")
+            return
+            
         try:
             import torch
             from transformers import pipeline
@@ -152,14 +159,18 @@ class UltravoxNode(Node):
                 if response:
                     yield (response,)
 
-    async def cleanup(self) -> None:
-        """Process any remaining audio in the buffer before shutting down."""
+    async def flush(self) -> Optional[tuple]:
+        """Process any remaining audio in the buffer and return the response."""
         if self.llm_pipeline and len(self.audio_buffer) > 0:
             logger.info(f"Cleaning up and processing remaining {len(self.audio_buffer) / self.sample_rate:.2f}s of audio...")
             response = await self._generate_response(self.audio_buffer.copy())
+            self.audio_buffer = np.array([], dtype=np.float32)
             if response:
-                # This response will be yielded if the pipeline is still being iterated
-                pass
+                return (response,)
+        return None
+
+    async def cleanup(self) -> None:
+        """Clean up the model resources."""
         self.audio_buffer = np.array([], dtype=np.float32)
         self.llm_pipeline = None
         self.device = None
