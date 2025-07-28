@@ -35,20 +35,28 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from remotemedia.core.pipeline import Pipeline
 from remotemedia.core.node import RemoteExecutorConfig
 from remotemedia.nodes.source import MediaReaderNode, AudioTrackSource
-from remotemedia.nodes.audio import AudioTransform, ExtractAudioDataNode
+from remotemedia.nodes.audio import AudioTransform, ExtractAudioDataNode, AudioBuffer
 from remotemedia.nodes.remote import RemoteObjectExecutionNode
 from remotemedia.nodes.ml import UltravoxNode
 from remotemedia.nodes import PassThroughNode
 
 # Configure basic logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 
 class PrintNode(PassThroughNode):
     """A simple node that prints any data it receives."""
-    async def process(self, data_stream):
-        async for data in data_stream:
-            print(f"\n>> ULTRAVOX RESPONSE: {data[0]}\n")
+    async def process(self, data):
+        """
+        Process data, which can be either a single item or an async generator.
+        """
+        if hasattr(data, '__aiter__'):  # If it's an async generator
+            async for item in data:
+                print(f"\n>> ULTRAVOX RESPONSE: {item[0] if isinstance(item, tuple) else item}\n")
+                yield item
+        else:  # If it's a single item
+            print(f"\n>> ULTRAVOX RESPONSE: {data[0] if isinstance(data, tuple) else data}\n")
             yield data
 
 
@@ -72,24 +80,37 @@ async def main():
     Main function to set up and run the remote Ultravox pipeline.
     """
     REMOTE_HOST = os.environ.get("REMOTE_HOST", "127.0.0.1")
-    # This example demonstrates using the Ultravox models for text-to-speech
-    # and voice cloning, executed on a remote server.
-
-    # --- Text-to-Speech (TTS) ---
-    logging.info("--- Running Remote Ultravox TTS ---")
+    logger.info("--- Running Remote Ultravox TTS ---")
 
     dummy_audio_path = "examples/transcribe_demo.wav"
+    await create_dummy_audio_file(dummy_audio_path)
 
     pipeline = Pipeline()
 
     # The MediaReaderNode will provide the initial stream of audio chunks locally
-    pipeline.add_node(MediaReaderNode(path=dummy_audio_path, chunk_size=4096))
+    pipeline.add_node(MediaReaderNode(
+        path=dummy_audio_path, 
+        chunk_size=4096,
+        name="MediaReader"
+    ))
 
     # Convert av.AudioFrame objects into (ndarray, sample_rate) tuples
-    pipeline.add_node(AudioTrackSource())
+    pipeline.add_node(AudioTrackSource(name="AudioTrackSource"))
 
     # Ultravox expects 16kHz audio, so we resample it locally.
-    pipeline.add_node(AudioTransform(output_sample_rate=16000, output_channels=1))
+    pipeline.add_node(AudioTransform(
+        output_sample_rate=16000, 
+        output_channels=1,
+        name="AudioTransform"
+    ))
+
+    # Add a buffer to properly handle streaming
+    buffer_node = AudioBuffer(
+        buffer_size_samples=16000,  # 1 second buffer at 16kHz
+        name="AudioBuffer"
+    )
+    buffer_node.is_streaming = True  # Ensure streaming mode is enabled
+    pipeline.add_node(buffer_node)
 
     # Configure the remote execution
     remote_config = RemoteExecutorConfig(host=REMOTE_HOST, port=50052, ssl_enabled=False)
@@ -98,24 +119,42 @@ async def main():
     #    We can configure its parameters just like any other local object.
     ultravox_instance = UltravoxNode(
         model_id="fixie-ai/ultravox-v0_5-llama-3_1-8b",
-        system_prompt="You are a friendly and helpful poetic assistant who loves answering questions. You excel at explaining complex scientific concepts with creative flair and a warm, engaging personality."
+        system_prompt="You are a friendly and helpful poetic assistant who loves answering questions. You excel at explaining complex scientific concepts with creative flair and a warm, engaging personality.",
+        buffer_duration_s=1.0,  # Match the AudioBuffer size
+        name="UltravoxNode"
     )
 
     # 2. Use RemoteObjectExecutionNode to execute this object on the server.
     #    The node object is serialized and sent to the server, which then streams
     #    data to and from its `process` method.
-    pipeline.add_node(remote_config(ultravox_instance))
+    remote_node = RemoteObjectExecutionNode(
+        obj_to_execute=ultravox_instance,
+        remote_config=remote_config,
+        name="RemoteUltravox",
+        node_config={
+            'streaming': True,  # Enable streaming in node config
+            'buffer_size': 16000  # Match audio buffer size
+        }
+    )
+    remote_node.is_streaming = True  # Ensure streaming mode is enabled
+    pipeline.add_node(remote_node)
 
     # Add a simple node to print the text response from the server
-    pipeline.add_node(PrintNode())
+    pipeline.add_node(PrintNode(name="PrintNode"))
 
-    logging.info("Starting remote Ultravox pipeline (via object streaming)...")
+    logger.info("Starting remote Ultravox pipeline (via object streaming)...")
     async with pipeline.managed_execution():
-        async for _ in pipeline.process():
-            # The pipeline runs as we consume its output stream.
-            pass
+        try:
+            logger.info("Pipeline execution started, consuming stream...")
+            # Process the stream in chunks
+            async for result in pipeline.process():
+                logger.debug(f"Pipeline produced result: {result}")
+            logger.info("Pipeline stream consumed successfully.")
+        except Exception as e:
+            logger.error(f"Pipeline error: {e}", exc_info=True)
+            raise  # Re-raise to ensure proper cleanup
 
-    logging.info("Remote Ultravox pipeline finished.")
+    logger.info("Remote Ultravox pipeline finished.")
 
 if __name__ == "__main__":
     try:

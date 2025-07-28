@@ -256,10 +256,12 @@ class RemoteExecutionClient:
         string_config = {k: str(v) for k, v in config.items()}
 
         async def request_generator():
+            # First, send the initialization message
             init_kwargs = {
                 "config": string_config,
-                "serialization_format": serialization_format,
+                "serialization_format": serialization_format
             }
+            
             if session_id:
                 init_kwargs["session_id"] = session_id
             elif obj is not None:
@@ -269,23 +271,28 @@ class RemoteExecutionClient:
                 raise ValueError("Either obj or session_id must be provided.")
 
             init_message = execution_pb2.StreamObjectInit(**init_kwargs)
-            yield execution_pb2.StreamObjectRequest(init=init_message)
+            init_request = execution_pb2.StreamObjectRequest(init=init_message)
+            yield init_request
 
+            # Then, send the data chunks
             async for item in input_stream:
-                serialized_data, _ = serializer.serialize(item)
+                serialized_data = serializer.serialize(item)
                 yield execution_pb2.StreamObjectRequest(data=serialized_data)
 
         try:
             async for response in self.stub.StreamObject(request_generator()):
                 if response.HasField("error"):
                     raise RemoteExecutionError(f"Remote stream error: {response.error}")
-                
-                output_data = serializer.deserialize(response.data)
-                yield output_data
-        
+                if response.HasField("data"):
+                    output_data = serializer.deserialize(response.data)
+                    yield output_data
+
         except grpc.aio.AioRpcError as e:
             logger.error(f"gRPC stream error in stream_object: {e}")
             raise RemoteExecutionError(f"gRPC stream failed: {e}") from e
+        except Exception as e:
+            logger.error(f"Error in stream_object: {e}", exc_info=True)
+            raise RemoteExecutionError(f"Stream failed: {e}") from e
 
     async def execute_object_method(
         self,

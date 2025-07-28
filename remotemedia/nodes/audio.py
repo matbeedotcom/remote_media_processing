@@ -2,7 +2,7 @@
 Audio processing nodes for the RemoteMedia SDK.
 """
 
-from typing import Any
+from typing import Any, AsyncGenerator
 import logging
 import librosa
 import numpy as np
@@ -111,89 +111,79 @@ class AudioBuffer(Node):
         self._buffer = None
         self._sample_rate = None
         self._channels = None
+        self.is_streaming = True
 
-    def process(self, data: Any) -> Any:
+    async def process(self, data_stream) -> AsyncGenerator[Any, None]:
         """
         Buffers audio data until `buffer_size_samples` is reached.
 
-        This method expects `data` to be a tuple `(audio_data, sample_rate)`,
+        This method expects each item in the stream to be a tuple `(audio_data, sample_rate)`,
         where `audio_data` is a NumPy array with shape (channels, samples).
 
         It accumulates `audio_data` and when at least `buffer_size_samples` are
-        available, it returns a chunk of that size. Any remaining samples are
-        kept in the buffer for the next call. If not enough data is available to
-        form a full chunk, it returns `None`.
+        available, it yields a chunk of that size. Any remaining samples are
+        kept in the buffer for the next chunk.
 
         Args:
-            data: A tuple containing the audio data and its sample rate.
+            data_stream: An async generator yielding tuples of (audio_data, sample_rate).
 
-        Returns:
-            A tuple `(buffered_audio_data, sample_rate)` when the buffer is
-            full, otherwise `None`.
+        Yields:
+            A tuple `(buffered_audio_data, sample_rate)` when the buffer is full.
         """
-        if not isinstance(data, tuple) or len(data) != 2:
-            logger.warning(
-                f"AudioBuffer '{self.name}': received data in unexpected format. "
-                "Expected (audio_data, sample_rate)."
-            )
-            return None
+        async for data in data_stream:
+            if not isinstance(data, tuple) or len(data) != 2:
+                logger.warning(
+                    f"AudioBuffer '{self.name}': received data in unexpected format. "
+                    "Expected (audio_data, sample_rate)."
+                )
+                continue
 
-        audio_chunk, sample_rate = data
+            audio_chunk, sample_rate = data
 
-        if not isinstance(audio_chunk, np.ndarray):
-            logger.warning(f"AudioBuffer '{self.name}': audio data is not a numpy array.")
-            return None
+            if not isinstance(audio_chunk, np.ndarray):
+                logger.warning(f"AudioBuffer '{self.name}': audio data is not a numpy array.")
+                continue
 
-        if audio_chunk.ndim == 1:
-            audio_chunk = audio_chunk.reshape(1, -1)
+            # Ensure audio_chunk is 2D (channels, samples)
+            if audio_chunk.ndim == 1:
+                audio_chunk = audio_chunk.reshape(1, -1)
 
-        if self._buffer is None:
-            self._sample_rate = sample_rate
-            self._channels = audio_chunk.shape[0]
-            self._buffer = np.zeros((self._channels, 0), dtype=audio_chunk.dtype)
+            # Initialize buffer if needed
+            if self._buffer is None:
+                self._sample_rate = sample_rate
+                self._channels = audio_chunk.shape[0]
+                self._buffer = np.zeros((self._channels, 0), dtype=audio_chunk.dtype)
 
-        if sample_rate != self._sample_rate or audio_chunk.shape[0] != self._channels:
-            logger.warning(
-                f"AudioBuffer '{self.name}': Audio format changed mid-stream. "
-                "Flushing buffer and resetting."
-            )
-            flushed_data = self.flush()
-            self._sample_rate = sample_rate
-            self._channels = audio_chunk.shape[0]
-            self._buffer = audio_chunk
-            return flushed_data
+            # Handle format changes
+            if sample_rate != self._sample_rate or audio_chunk.shape[0] != self._channels:
+                logger.warning(
+                    f"AudioBuffer '{self.name}': Audio format changed mid-stream. "
+                    "Flushing buffer and resetting."
+                )
+                if self._buffer.shape[1] > 0:
+                    yield (self._buffer, self._sample_rate)
+                self._sample_rate = sample_rate
+                self._channels = audio_chunk.shape[0]
+                self._buffer = audio_chunk
+                continue
 
-        self._buffer = np.concatenate((self._buffer, audio_chunk), axis=1)
+            # Append to buffer
+            self._buffer = np.concatenate((self._buffer, audio_chunk), axis=1)
 
-        if self._buffer.shape[1] >= self.buffer_size_samples:
-            output_chunk = self._buffer[:, : self.buffer_size_samples]
-            self._buffer = self._buffer[:, self.buffer_size_samples :]
-            logger.debug(
-                f"AudioBuffer '{self.name}': outputting chunk of "
-                f"{self.buffer_size_samples} samples."
-            )
-            return (output_chunk, self._sample_rate)
-        else:
-            logger.debug(
-                f"AudioBuffer '{self.name}': buffering, have "
-                f"{self._buffer.shape[1]}/{self.buffer_size_samples} samples."
-            )
-            return None
+            # Output complete chunks
+            while self._buffer.shape[1] >= self.buffer_size_samples:
+                output_chunk = self._buffer[:, :self.buffer_size_samples]
+                self._buffer = self._buffer[:, self.buffer_size_samples:]
+                logger.debug(
+                    f"AudioBuffer '{self.name}': outputting chunk of "
+                    f"{self.buffer_size_samples} samples."
+                )
+                yield (output_chunk, self._sample_rate)
 
-    def flush(self) -> Any:
-        """
-        Flushes any remaining data from the buffer.
-
-        Returns:
-            A tuple `(buffered_audio_data, sample_rate)` if there is any
-            data in the buffer, otherwise `None`.
-        """
+        # Flush any remaining data
         if self._buffer is not None and self._buffer.shape[1] > 0:
             logger.debug(f"AudioBuffer '{self.name}': flushing {self._buffer.shape[1]} samples.")
-            output_chunk = self._buffer
-            self._buffer = np.zeros((self._channels, 0), dtype=output_chunk.dtype)
-            return (output_chunk, self._sample_rate)
-        return None
+            yield (self._buffer, self._sample_rate)
 
 
 class AudioResampler(Node):
@@ -232,4 +222,173 @@ class ExtractAudioDataNode(Node):
         return None
 
 
-__all__ = ["AudioTransform", "AudioBuffer", "AudioResampler", "ExtractAudioDataNode"] 
+class VoiceActivityDetector(Node):
+    """
+    Voice Activity Detection (VAD) node that detects speech segments in audio streams.
+    
+    This node uses energy-based VAD with adaptive thresholding to detect speech.
+    It can operate in two modes:
+    - Passthrough mode: Adds VAD metadata to audio chunks
+    - Filter mode: Only passes through audio chunks containing speech
+    """
+    
+    def __init__(
+        self,
+        frame_duration_ms: int = 30,
+        energy_threshold: float = 0.02,
+        speech_threshold: float = 0.3,
+        filter_mode: bool = False,
+        include_metadata: bool = True,
+        **kwargs
+    ):
+        """
+        Initialize the VAD node.
+        
+        Args:
+            frame_duration_ms: Duration of each frame for VAD analysis (10, 20, or 30 ms)
+            energy_threshold: Energy threshold for speech detection (0.0 to 1.0)
+            speech_threshold: Ratio of speech frames to total frames to consider segment as speech
+            filter_mode: If True, only output audio chunks containing speech
+            include_metadata: If True, include VAD metadata in output
+        """
+        super().__init__(**kwargs)
+        self.frame_duration_ms = frame_duration_ms
+        self.energy_threshold = energy_threshold
+        self.speech_threshold = speech_threshold
+        self.filter_mode = filter_mode
+        self.include_metadata = include_metadata
+        self.is_streaming = True
+        
+        # State for adaptive thresholding
+        self._energy_history = []
+        self._history_size = 100
+        
+    async def process(self, data_stream) -> AsyncGenerator[Any, None]:
+        """
+        Process audio stream for voice activity detection.
+        
+        Args:
+            data_stream: Async generator yielding (audio_data, sample_rate) tuples
+            
+        Yields:
+            In passthrough mode: ((audio_data, sample_rate), vad_metadata)
+            In filter mode: (audio_data, sample_rate) for speech segments only
+        """
+        async for data in data_stream:
+            if not isinstance(data, tuple) or len(data) != 2:
+                logger.warning(f"VAD '{self.name}': Invalid input format")
+                continue
+                
+            audio_data, sample_rate = data
+            
+            if not isinstance(audio_data, np.ndarray):
+                logger.warning(f"VAD '{self.name}': Audio data is not numpy array")
+                continue
+                
+            # Ensure 2D array (channels, samples)
+            if audio_data.ndim == 1:
+                audio_data = audio_data.reshape(1, -1)
+                
+            # Convert to mono for VAD analysis
+            if audio_data.shape[0] > 1:
+                mono_audio = np.mean(audio_data, axis=0)
+            else:
+                mono_audio = audio_data[0]
+                
+            # Calculate frame size in samples
+            frame_samples = int(sample_rate * self.frame_duration_ms / 1000)
+            
+            # Analyze frames
+            is_speech, vad_info = self._analyze_audio(mono_audio, frame_samples)
+            
+            # Create metadata
+            metadata = {
+                "is_speech": is_speech,
+                "speech_ratio": vad_info["speech_ratio"],
+                "avg_energy": vad_info["avg_energy"],
+                "frame_duration_ms": self.frame_duration_ms
+            }
+            
+            # Output based on mode
+            if self.filter_mode:
+                # Only output if speech detected
+                if is_speech:
+                    logger.debug(f"VAD '{self.name}': Speech detected (ratio: {vad_info['speech_ratio']:.2f})")
+                    yield (audio_data, sample_rate)
+                else:
+                    logger.debug(f"VAD '{self.name}': No speech detected, filtering out")
+            else:
+                # Passthrough mode - always output with metadata
+                if self.include_metadata:
+                    yield ((audio_data, sample_rate), metadata)
+                else:
+                    yield (audio_data, sample_rate)
+                    
+    def _analyze_audio(self, audio: np.ndarray, frame_samples: int) -> tuple[bool, dict]:
+        """
+        Analyze audio for voice activity.
+        
+        Returns:
+            (is_speech, vad_info) tuple
+        """
+        # Calculate energy for each frame
+        num_frames = len(audio) // frame_samples
+        speech_frames = 0
+        total_energy = 0
+        
+        # Adaptive threshold based on recent history
+        adaptive_threshold = self._calculate_adaptive_threshold()
+        
+        for i in range(num_frames):
+            start = i * frame_samples
+            end = start + frame_samples
+            frame = audio[start:end]
+            
+            # Calculate frame energy (RMS)
+            energy = np.sqrt(np.mean(frame**2))
+            total_energy += energy
+            
+            # Update energy history
+            self._energy_history.append(energy)
+            if len(self._energy_history) > self._history_size:
+                self._energy_history.pop(0)
+            
+            # Check if frame contains speech
+            if energy > adaptive_threshold:
+                speech_frames += 1
+                
+        # Calculate statistics
+        avg_energy = total_energy / max(num_frames, 1)
+        speech_ratio = speech_frames / max(num_frames, 1)
+        
+        # Determine if segment contains speech
+        is_speech = speech_ratio >= self.speech_threshold
+        
+        return is_speech, {
+            "speech_ratio": speech_ratio,
+            "avg_energy": float(avg_energy),
+            "adaptive_threshold": float(adaptive_threshold),
+            "num_frames": num_frames,
+            "speech_frames": speech_frames
+        }
+        
+    def _calculate_adaptive_threshold(self) -> float:
+        """
+        Calculate adaptive energy threshold based on recent history.
+        """
+        if not self._energy_history:
+            return self.energy_threshold
+            
+        # Use percentile-based threshold
+        sorted_history = sorted(self._energy_history)
+        percentile_idx = int(len(sorted_history) * 0.3)  # 30th percentile
+        noise_floor = sorted_history[percentile_idx] if percentile_idx < len(sorted_history) else self.energy_threshold
+        
+        # Adaptive threshold is noise floor plus margin
+        adaptive = noise_floor * 2.5
+        
+        # Blend with fixed threshold
+        return 0.7 * adaptive + 0.3 * self.energy_threshold
+
+
+__all__ = ["AudioTransform", "AudioBuffer", "AudioResampler", "ExtractAudioDataNode", "VoiceActivityDetector"] 

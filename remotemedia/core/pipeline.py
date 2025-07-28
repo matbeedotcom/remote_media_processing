@@ -248,26 +248,37 @@ class Pipeline:
             
             async def feeder():
                 """Task to feed the internal queue from the main input queue."""
-                while True:
-                    item = await in_queue.get()
-                    await internal_queue.put(item)
-                    if item is _SENTINEL:
-                        break
+                try:
+                    while True:
+                        item = await in_queue.get()
+                        self.logger.debug(f"STREAMING-WORKER-FEED: '{node.name}' got item from input queue")
+                        await internal_queue.put(item)
+                        if item is _SENTINEL:
+                            break
+                except Exception as e:
+                    self.logger.error(f"STREAMING-WORKER-FEED-ERROR: in '{node.name}': {e}", exc_info=True)
+                    await internal_queue.put(_SENTINEL)
 
             feeder_task = asyncio.create_task(feeder())
 
             try:
                 # The node's process method will take the input from the internal queue
                 async def in_stream():
-                    while True:
-                        item = await internal_queue.get()
-                        if item is _SENTINEL:
-                            break
-                        yield item
+                    try:
+                        while True:
+                            item = await internal_queue.get()
+                            self.logger.debug(f"STREAMING-WORKER-STREAM: '{node.name}' got item from internal queue")
+                            if item is _SENTINEL:
+                                break
+                            yield item
+                    except Exception as e:
+                        self.logger.error(f"STREAMING-WORKER-STREAM-ERROR: in '{node.name}': {e}", exc_info=True)
 
                 if inspect.isasyncgenfunction(node.process):
+                    self.logger.debug(f"STREAMING-WORKER-PROCESS: '{node.name}' starting process")
                     async for result in node.process(in_stream()):
                         if result is not None:
+                            self.logger.debug(f"STREAMING-WORKER-RESULT: '{node.name}' produced output")
                             await out_queue.put(result)
                 
                 await out_queue.put(_SENTINEL)
@@ -276,8 +287,13 @@ class Pipeline:
                 self.logger.error(f"STREAMING-WORKER-ERROR: in '{node.name}': {e}", exc_info=True)
                 await out_queue.put(_SENTINEL)
             finally:
+                # Wait for the feeder task to complete or cancel it
                 if not feeder_task.done():
                     feeder_task.cancel()
+                    try:
+                        await feeder_task
+                    except asyncio.CancelledError:
+                        pass
                 self.logger.info(f"STREAMING-WORKER-FINISH: '{node.name}'")
 
         tasks = []

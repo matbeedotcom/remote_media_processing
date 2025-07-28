@@ -16,7 +16,7 @@ from .source import * # noqa: F401, F403
 from .remote import * # noqa: F401, F403
 from .sink import * # noqa: F401, F403
 from remotemedia.core.node import Node
-from .audio import AudioTransform, AudioBuffer, AudioResampler
+from .audio import AudioTransform, AudioBuffer, AudioResampler, VoiceActivityDetector
 from .text_processor import TextProcessorNode
 from .transform import DataTransform
 from .video import VideoTransform, VideoBuffer, VideoResizer
@@ -36,6 +36,7 @@ __all__ = [
     "AudioTransform",
     "AudioBuffer",
     "AudioResampler",
+    "VoiceActivityDetector",
     # Source
     "MediaReaderNode",
     "AudioTrackSource",

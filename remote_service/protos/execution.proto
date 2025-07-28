@@ -105,9 +105,12 @@ message StreamObjectResponse {
 
 // Message to initialize a serialized object streaming session
 message StreamObjectInit {
-  bytes code_package = 1;           // Packaged user code (zip archive)
-  map<string, string> config = 2;   // The configuration for the node
-  string serialization_format = 3;   // The serialization format for data payloads
+  oneof object_specifier {
+    bytes code_package = 1;           // Packaged user code (zip archive)
+    string session_id = 2;            // Session ID for existing objects
+  }
+  map<string, string> config = 3;     // The configuration for the node
+  string serialization_format = 4;    // The serialization format for data payloads
 }
 
 // Request to execute a method on a serialized object
