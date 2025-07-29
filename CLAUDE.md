@@ -21,6 +21,8 @@ RemoteMedia Processing SDK is a Python SDK for building distributed audio/video/
 ### Node Types
 - **Built-in Nodes** (`remotemedia/nodes/`): Audio, video, transform, calculator, text processing
 - **Audio Nodes**: `AudioTransform`, `AudioBuffer`, `VoiceActivityDetector` (VAD)
+- **ML Nodes**: `UltravoxNode` (speech-to-text), `KokoroTTSNode` (text-to-speech)
+- **WebRTC Integration**: Real-time audio/video streaming with aiortc
 - **Custom Execution**: `CodeExecutorNode` for remote Python code, `SerializedClassExecutorNode` for CloudPickle objects
 - **Streaming Support**: Nodes can be streaming (async generators) or regular (single item processing)
 
@@ -80,6 +82,18 @@ cd remote_service && ./scripts/test.sh
 cd remote_service && docker-compose up
 ```
 
+### WebRTC Server
+```bash
+# Run WebRTC server with ML pipeline
+USE_ML=true python examples/webrtc_pipeline_server.py
+
+# Run basic WebRTC server (no ML)
+python examples/webrtc_pipeline_server.py
+
+# Connect with web client
+open http://localhost:8080/webrtc_client.html
+```
+
 ## Testing Strategy
 
 The project has comprehensive test coverage including:
@@ -122,6 +136,14 @@ Key test files:
 
 ## Current Development Phase
 
+Phase 4 (WebRTC Real-time Audio Processing) is COMPLETE:
+- ✅ WebRTC server with aiortc integration
+- ✅ Real-time audio streaming with proper frame timing
+- ✅ Voice Activity Detection (VAD) with speech segmentation
+- ✅ Speech-to-speech pipeline (Ultravox + Kokoro TTS)
+- ✅ VAD-triggered buffering with pre-speech context
+- ✅ WebRTC audio output with 20ms frame synchronization
+
 Phase 3 (Advanced Offloading for User-Defined Python Code) is COMPLETE:
 - ✅ Remote Python code execution with CloudPickle
 - ✅ AST-based dependency analysis for local imports
@@ -148,3 +170,31 @@ Phase 3 (Advanced Offloading for User-Defined Python Code) is COMPLETE:
 2. Enable debug logging: Set log level in `remotemedia/utils/logging.py`
 3. Use `RemoteExecutionClient` directly for testing
 4. Inspect serialized payloads and gRPC messages
+
+### WebRTC Audio Pipeline Architecture
+
+The WebRTC integration implements a complete speech-to-speech system:
+
+1. **Audio Input**: WebRTC client captures microphone audio
+2. **Audio Processing**: `AudioTransform` resamples to 16kHz for ML models
+3. **Voice Activity Detection**: `VoiceActivityDetector` identifies speech vs silence
+4. **Speech Buffering**: `VADTriggeredBuffer` accumulates complete utterances:
+   - Maintains 1s rolling pre-speech buffer
+   - Waits for ≥1s of speech + 500ms silence before triggering
+   - Includes pre-speech context in output
+5. **Speech Recognition**: `UltravoxImmediateProcessor` processes complete utterances:
+   - Bypasses internal buffering to prevent accumulation
+   - Clears buffer after each inference
+   - Processes each speech segment individually
+6. **Text-to-Speech**: `KokoroTTSNode` synthesizes response audio
+7. **Audio Output**: `AudioOutputTrack` streams back to WebRTC client:
+   - Splits audio into 20ms frames
+   - Implements proper frame timing (50 FPS)
+   - Uses real-time rate limiting to prevent flooding
+
+### Key WebRTC Components
+
+- **WebRTCServer** (`remotemedia/webrtc/server.py`): Main server with signaling
+- **WebRTCPipelineProcessor** (`remotemedia/webrtc/pipeline_processor.py`): Integrates WebRTC with pipeline
+- **AudioOutputTrack**: Custom aiortc track with frame timing and PTS management
+- **VADTriggeredBuffer**: Smart buffering for complete speech segments
