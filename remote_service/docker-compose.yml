@@ -1,11 +1,9 @@
-version: '3.8'
-
 services:
   # Remote Execution Service
   remote-service:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: remote_service/Dockerfile
     container_name: remotemedia-service
     ports:
       - "50051:50051"  # gRPC port
@@ -19,11 +17,11 @@ services:
       - METRICS_PORT=8080
     volumes:
       # Mount logs for debugging
-      - ./logs:/app/logs
+      - ./remote_service/logs:/app/logs
       # Mount config for development
-      - ./config:/app/config:ro
+      - ./remote_service/config:/app/config:ro
       # Mount source for development (comment out for production)
-      - ./src:/app/src:ro
+      # - ./remote_service/src:/app/src:ro
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "/app/src/health_check.py"]
@@ -55,7 +53,7 @@ services:
     ports:
       - "9090:9090"
     volumes:
-      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./remote_service/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
@@ -78,8 +76,8 @@ services:
       - GF_SECURITY_ADMIN_PASSWORD=admin
     volumes:
       - grafana_data:/var/lib/grafana
-      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
-      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./remote_service/monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./remote_service/monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
     restart: unless-stopped
     profiles:
       - monitoring

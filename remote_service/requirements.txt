@@ -17,20 +17,13 @@ structlog>=22.0.0
 
 # Async support
 asyncio-mqtt>=0.11.0
+aiohttp-cors>=0.7.0
 
 # Monitoring and metrics
 prometheus-client>=0.15.0
 
-# SDK dependencies (for executing SDK nodes)
-# These should match the main SDK requirements
-torch>=2.0.0
-torchvision>=0.15.0
-torchaudio>=2.0.0
-transformers>=4.30.0
-opencv-python>=4.8.0
-pillow>=10.0.0
-librosa>=0.10.0
-scikit-learn>=1.3.0
+# SDK dependencies are now installed via the remotemedia package
+# which is installed directly from source in the Dockerfile
 
 # Development and testing (optional)
 pytest>=7.0.0

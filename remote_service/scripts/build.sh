@@ -23,6 +23,10 @@ if ! command -v docker &> /dev/null; then
     exit 1
 fi
 
+# Get the script directory and navigate to remote_service
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+cd "$SCRIPT_DIR/.."
+
 # Check if we're in the right directory
 if [ ! -f "$DOCKERFILE" ]; then
     echo -e "${RED}Error: Dockerfile not found. Are you in the remote_service directory?${NC}"
@@ -42,11 +46,12 @@ else
     echo -e "${YELLOW}Warning: protos directory not found, skipping gRPC generation${NC}"
 fi
 
-# Build Docker image
+# Build Docker image from parent directory for proper context
 echo -e "${YELLOW}Building Docker image...${NC}"
+cd ..
 docker build \
     -t "${IMAGE_NAME}:${IMAGE_TAG}" \
-    -f "$DOCKERFILE" \
+    -f "remote_service/$DOCKERFILE" \
     .
 
 if [ $? -eq 0 ]; then

@@ -14,11 +14,21 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /build
 
 # Copy requirements and install Python dependencies
-COPY requirements.txt .
+COPY remote_service/requirements.txt .
 RUN pip install --no-cache-dir --user -r requirements.txt
 
+# Copy remotemedia package source for installation
+COPY remotemedia /build/remotemedia
+COPY setup.py /build/setup.py
+COPY pyproject.toml /build/pyproject.toml
+COPY README.md /build/README.md
+COPY requirements-ml.txt /build/requirements-ml.txt
+
+# Install remotemedia package with ML extras (non-editable for proper deployment)
+RUN cd /build && pip install --no-cache-dir --user ".[ml]"
+
 # Copy proto files and generate gRPC code
-COPY protos/ ./protos/
+COPY remote_service/protos/ ./protos/
 RUN python -m grpc_tools.protoc \
     --proto_path=protos \
     --python_out=. \
@@ -55,8 +65,8 @@ COPY --from=builder /root/.local /home/remotemedia/.local
 COPY --from=builder /build/*.py /app/src/
 
 # Copy application source code
-COPY src/ /app/src/
-COPY config/ /app/config/
+COPY remote_service/src/ /app/src/
+COPY remote_service/config/ /app/config/
 
 # Set up Python path
 ENV PYTHONPATH=/app/src:/home/remotemedia/.local/lib/python3.11/site-packages
