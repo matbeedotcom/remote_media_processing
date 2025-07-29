@@ -4,6 +4,9 @@ services:
     build:
       context: ..
       dockerfile: remote_service/Dockerfile
+      args:
+        USER_UID: ${USER_UID:-1000}
+        USER_GID: ${USER_GID:-1000}
     container_name: remotemedia-service
     ports:
       - "50051:50051"  # gRPC port
@@ -15,6 +18,12 @@ services:
       - MAX_WORKERS=4
       - SANDBOX_TYPE=bubblewrap
       - METRICS_PORT=8080
+      # ML model cache configuration
+      - HF_HOME=/home/remotemedia/.cache/huggingface
+      - TRANSFORMERS_CACHE=/home/remotemedia/.cache/huggingface
+      - TORCH_HOME=/home/remotemedia/.cache/torch
+      - TORCH_CACHE=/home/remotemedia/.cache/torch
+      - REMOTEMEDIA_CACHE_DIR=/app/cache/models
     volumes:
       # Mount logs for debugging
       - ./remote_service/logs:/app/logs
@@ -22,6 +31,15 @@ services:
       - ./remote_service/config:/app/config:ro
       # Mount source for development (comment out for production)
       # - ./remote_service/src:/app/src:ro
+      # Model cache directories - choose one option:
+      # Option 1: Docker volumes (recommended for production)
+      # - ml_model_cache:/app/cache/models
+      # - huggingface_cache:/home/remotemedia/.cache/huggingface
+      # - torch_cache:/home/remotemedia/.cache/torch
+      # Option 2: Host directories (uncomment to use local directories)
+      - ./cache/models:/app/cache/models
+      - ./cache/huggingface:/home/remotemedia/.cache/huggingface
+      - ./cache/torch:/home/remotemedia/.cache/torch
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "/app/src/health_check.py"]
@@ -98,6 +116,10 @@ volumes:
   prometheus_data:
   grafana_data:
   redis_data:
+  # ML model cache volumes
+  ml_model_cache:
+  huggingface_cache:
+  torch_cache:
 
 networks:
   default:
