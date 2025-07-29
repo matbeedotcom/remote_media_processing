@@ -22,15 +22,13 @@ except ImportError:
 class UltravoxNode(Node):
     """
     A node that uses the Ultravox model for multimodal audio/text to text generation.
-    It receives audio chunks and, after buffering a set duration, processes the
-    buffered audio along with a text prompt to generate a text response.
+    It receives audio chunks and immediately processes them to generate a text response.
     """
 
     def __init__(self,
                  model_id: str = "fixie-ai/ultravox-v0_5-llama-3_2-1b",
                  device: Optional[str] = None,
                  torch_dtype: str = "bfloat16",
-                 buffer_duration_s: float = 5.0,
                  max_new_tokens: int = 100,
                  system_prompt: str = "You are a friendly and helpful AI assistant.",
                  **kwargs: Any) -> None:
@@ -39,16 +37,13 @@ class UltravoxNode(Node):
         self.model_id = model_id
         self._requested_device = device
         self._requested_torch_dtype = torch_dtype
-        self.buffer_duration_s = buffer_duration_s
         self.sample_rate = 16000  # Ultravox expects 16kHz audio
-        self.buffer_size = int(buffer_duration_s * self.sample_rate)
         self.max_new_tokens = max_new_tokens
         self.system_prompt = system_prompt
 
         self.llm_pipeline = None
         self.device = None
         self.torch_dtype = None
-        self.audio_buffer = np.array([], dtype=np.float32)
 
     async def initialize(self) -> None:
         """
@@ -132,7 +127,7 @@ class UltravoxNode(Node):
 
     async def process(self, data_stream: AsyncGenerator[Any, None]) -> AsyncGenerator[Any, None]:
         """
-        Process an incoming audio stream, buffer it, and yield generated text responses.
+        Process an incoming audio stream and yield generated text responses.
         Expects tuples of (numpy_array, sample_rate).
         """
         if not self.llm_pipeline:
@@ -149,29 +144,19 @@ class UltravoxNode(Node):
                 logger.warning(f"Received non-numpy audio_chunk of type {type(audio_chunk)}, skipping.")
                 continue
 
-            self.audio_buffer = np.concatenate([self.audio_buffer, audio_chunk.flatten().astype(np.float32)])
-
-            while len(self.audio_buffer) >= self.buffer_size:
-                segment_to_process = self.audio_buffer[:self.buffer_size]
-                self.audio_buffer = self.audio_buffer[self.buffer_size:]
-
-                response = await self._generate_response(segment_to_process.copy())
+            # Process the audio chunk immediately
+            audio_data = audio_chunk.flatten().astype(np.float32)
+            if len(audio_data) > 0:
+                response = await self._generate_response(audio_data)
                 if response:
                     yield (response,)
 
     async def flush(self) -> Optional[tuple]:
-        """Process any remaining audio in the buffer and return the response."""
-        if self.llm_pipeline and len(self.audio_buffer) > 0:
-            logger.info(f"Cleaning up and processing remaining {len(self.audio_buffer) / self.sample_rate:.2f}s of audio...")
-            response = await self._generate_response(self.audio_buffer.copy())
-            self.audio_buffer = np.array([], dtype=np.float32)
-            if response:
-                return (response,)
+        """No buffering needed - flush is a no-op."""
         return None
 
     async def cleanup(self) -> None:
         """Clean up the model resources."""
-        self.audio_buffer = np.array([], dtype=np.float32)
         self.llm_pipeline = None
         self.device = None
         self.torch_dtype = None
