@@ -1,5 +1,6 @@
 # Machine Learning dependencies (optional)
-torch>=2.0.0
+torch==2.7.1
+transformers==4.54.0
 torchvision>=0.15.0
 torchaudio>=2.0.0
 transformers>=4.30.0
@@ -11,3 +12,5 @@ accelerate
 datasets
 soundfile 
 peft 
+kokoro==0.9.4
+qwen_omni_utils==0.0.8
