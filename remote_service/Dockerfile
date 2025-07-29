@@ -8,6 +8,9 @@ ARG USER_GID=996
 # Build stage - compile gRPC and dependencies
 FROM ubuntu:22.04 as builder
 
+# Set non-interactive mode to prevent prompts
+ENV DEBIAN_FRONTEND=noninteractive
+
 # Install build dependencies
 RUN apt-get update && apt-get install -y \
     build-essential \
@@ -48,6 +51,9 @@ FROM ubuntu:22.04 as runtime
 # Re-declare build arguments for runtime stage
 ARG USER_UID=996  
 ARG USER_GID=996
+
+# Set non-interactive mode to prevent prompts
+ENV DEBIAN_FRONTEND=noninteractive
 
 # Install runtime dependencies and security tools
 RUN apt-get update && apt-get install -y \

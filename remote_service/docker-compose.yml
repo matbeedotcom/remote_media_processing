@@ -9,8 +9,8 @@ services:
         USER_GID: ${USER_GID:-1000}
     container_name: remotemedia-service
     ports:
-      - "50051:50051"  # gRPC port
-      - "8080:8080"    # Metrics/health port
+      - "${GRPC_PORT:-50051}:${GRPC_PORT:-50051}"  # gRPC port
+      - "${METRICS_PORT:-8080}:${METRICS_PORT:-8080}"    # Metrics/health port
     environment:
       - GRPC_PORT=50051
       - LOG_LEVEL=DEBUG
