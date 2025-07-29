@@ -9,6 +9,7 @@ This script demonstrates the full power of the cloudpickle streaming solution.
 import asyncio
 import numpy as np
 import logging
+import os
 
 # Ensure the 'remotemedia' package is in the Python path
 import sys
@@ -18,6 +19,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from remotemedia.core.node import Node, RemoteExecutorConfig
 from remotemedia.core.pipeline import Pipeline
 from remotemedia.nodes.remote import RemoteObjectExecutionNode
+from remotemedia.nodes.audio import AudioFileSource, AudioPlayer
+from remotemedia.nodes.misc import PrintNode
 
 # Configure basic logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -95,7 +98,8 @@ async def main():
     Main function to set up and run the remote object streaming pipeline.
     """
     # 1. Configuration
-    remote_config = RemoteExecutorConfig(host="127.0.0.1", port=50052, ssl_enabled=False)
+    REMOTE_HOST = os.environ.get("REMOTE_HOST", "127.0.0.1")
+    remote_config = RemoteExecutorConfig(host=REMOTE_HOST, port=50052, ssl_enabled=False)
     sample_rate = 16000
     
     # 2. Create the custom object to be executed remotely

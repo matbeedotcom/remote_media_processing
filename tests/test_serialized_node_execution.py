@@ -1,13 +1,13 @@
 import pytest
 import asyncio
-import base64
 import cloudpickle
 
 from remotemedia.core.node import RemoteExecutorConfig
 from remotemedia.remote.client import RemoteExecutionClient
-from remotemedia.nodes.custom import StatefulCounter
+from remotemedia.core.exceptions import RemoteExecutionError
 
-# A simple stateful class for testing
+# A simple stateful class for testing, defined directly in the test module
+# to ensure that the CodePackager is correctly handling its dependency.
 class StatefulCounter:
     def __init__(self, initial_value=0):
         self.value = initial_value
@@ -20,7 +20,7 @@ class StatefulCounter:
         return self.value
 
 @pytest.fixture(scope="function")
-async def remote_client():
+async def remote_client(grpc_server):
     """A pytest fixture to set up and tear down the remote client."""
     config = RemoteExecutorConfig(
         host='127.0.0.1',
@@ -37,134 +37,128 @@ async def remote_client():
 async def test_remote_class_simple_execution(remote_client):
     """
     Tests a single, simple method call on a remotely executed object.
+    This uses the session-based ExecuteObjectMethod RPC.
     """
     counter = StatefulCounter(initial_value=5)
     
-    serialized_obj = base64.b64encode(cloudpickle.dumps(counter)).decode('ascii')
-    
-    request_data = {
-        "serialized_object": serialized_obj,
-        "method_name": "get_value",
-    }
-
-    response = await remote_client.execute_node(
-        node_type="SerializedClassExecutorNode",
-        config={},
-        input_data=request_data,
-        serialization_format="pickle"
+    response = await remote_client.execute_object_method(
+        obj=counter,
+        method_name="get_value",
+        method_args=[]
     )
 
-    assert 'error' not in response, f"Received an unexpected error: {response.get('error')}"
+    assert 'result' in response
     assert response['result'] == 5
+    assert 'session_id' in response
 
 @pytest.mark.asyncio
 async def test_remote_class_stateful_execution(remote_client):
     """
-    Tests that state is preserved between calls by passing the updated
-    serialized object back to the remote executor.
+    Tests that state is preserved between calls by using the new
+    session-based ExecuteObjectMethod RPC.
     """
     counter = StatefulCounter(initial_value=10)
     
-    # --- First call: increment from 10 to 11 ---
-    serialized_obj = base64.b64encode(cloudpickle.dumps(counter)).decode('ascii')
-    
-    request_data_1 = {
-        "serialized_object": serialized_obj,
-        "method_name": "increment",
-    }
-
-    response_1 = await remote_client.execute_node(
-        node_type="SerializedClassExecutorNode",
-        config={},
-        input_data=request_data_1,
-        serialization_format="pickle"
+    # --- First call: initialize session and increment from 10 to 11 ---
+    response_1 = await remote_client.execute_object_method(
+        obj=counter,
+        method_name="increment",
+        method_args=[]
     )
 
-    assert 'error' not in response_1
     assert response_1['result'] == 11
-    assert 'updated_serialized_object' in response_1
-
-    # --- Second call: increment from 11 to 12 ---
-    # Use the updated object from the first response
-    updated_serialized_obj = response_1['updated_serialized_object']
+    session_id = response_1['session_id']
+    assert session_id is not None
     
-    request_data_2 = {
-        "serialized_object": updated_serialized_obj,
-        "method_name": "increment",
-    }
-
-    response_2 = await remote_client.execute_node(
-        node_type="SerializedClassExecutorNode",
-        config={},
-        input_data=request_data_2,
-        serialization_format="pickle"
+    # --- Second call: increment from 11 to 12 using the session_id ---
+    response_2 = await remote_client.execute_object_method(
+        obj=None,  # No object needed when session_id is provided
+        session_id=session_id,
+        method_name="increment",
+        method_args=[]
     )
     
-    assert 'error' not in response_2
     assert response_2['result'] == 12
 
     # --- Third call: get_value to confirm state ---
-    # Use the updated object from the second response
-    final_serialized_obj = response_2['updated_serialized_object']
-
-    request_data_3 = {
-        "serialized_object": final_serialized_obj,
-        "method_name": "get_value",
-    }
-
-    response_3 = await remote_client.execute_node(
-        node_type="SerializedClassExecutorNode",
-        config={},
-        input_data=request_data_3,
-        serialization_format="pickle"
+    response_3 = await remote_client.execute_object_method(
+        obj=None,
+        session_id=session_id,
+        method_name="get_value",
+        method_args=[]
     )
 
-    assert 'error' not in response_3
     assert response_3['result'] == 12
 
 @pytest.mark.asyncio
 async def test_remote_class_error_handling(remote_client):
     """
-    Tests that the remote executor correctly handles and reports errors,
-    such as calling a method that does not exist.
+    Tests that the remote executor correctly handles calling a method
+    that does not exist in a session.
     """
     counter = StatefulCounter()
-    serialized_obj = base64.b64encode(cloudpickle.dumps(counter)).decode('ascii')
     
-    request_data = {
-        "serialized_object": serialized_obj,
-        "method_name": "non_existent_method",
-    }
-
-    response = await remote_client.execute_node(
-        node_type="SerializedClassExecutorNode",
-        config={},
-        input_data=request_data,
-        serialization_format="pickle"
+    # First, create the session
+    response_init = await remote_client.execute_object_method(
+        obj=counter,
+        method_name="get_value",
+        method_args=[]
     )
+    session_id = response_init['session_id']
 
-    assert 'error' in response
-    assert response['error_type'] == 'AttributeError'
-    assert "Object does not have method 'non_existent_method'" in response['error']
+    # Now, try to call a non-existent method
+    with pytest.raises(RemoteExecutionError) as excinfo:
+        await remote_client.execute_object_method(
+            obj=None,
+            session_id=session_id,
+            method_name="non_existent_method",
+            method_args=[]
+        )
+    
+    assert "'StatefulCounter' object has no attribute 'non_existent_method'" in str(excinfo.value)
+
+@pytest.mark.asyncio
+async def test_remote_class_bad_session_id(remote_client):
+    """
+    Tests that the server correctly reports an error if a bad
+    session ID is provided.
+    """
+    with pytest.raises(RemoteExecutionError) as excinfo:
+        await remote_client.execute_object_method(
+            obj=None,
+            session_id="this-is-not-a-valid-session-id",
+            method_name="any_method",
+            method_args=[]
+        )
+    
+    assert "Session not found" in str(excinfo.value)
 
 @pytest.mark.asyncio
 async def test_remote_class_deserialization_error(remote_client):
     """
     Tests that the server correctly reports an error if it cannot
     deserialize the provided object because the data is corrupted.
+    This test is now more complex because the packaging is robust. We'll
+    simulate a failure by sending a valid object that *tries* to import
+    a non-existent module.
     """
-    request_data = {
-        "serialized_object": "this is not valid base64 or pickle data",
-        "method_name": "do_something",
-    }
+    class BadImportClass:
+        def __init__(self):
+            pass
+        async def initialize(self):
+            import a_module_that_will_never_exist
+        def process(self, data):
+            return "should not get here"
+        async def cleanup(self):
+            pass
 
-    response = await remote_client.execute_node(
-        node_type="SerializedClassExecutorNode",
-        config={},
-        input_data=request_data,
-        serialization_format="pickle"
-    )
+    bad_obj = BadImportClass()
 
-    assert 'error' in response
-    assert response['error_type'] == 'ValueError'
-    assert 'Failed to deserialize object' in response['error'] 
+    with pytest.raises(Exception) as excinfo:
+        await remote_client.execute_object_method(
+            obj=bad_obj,
+            method_name="process",
+            method_args=["test"]
+        )
+    
+    assert "No module named 'a_module_that_will_never_exist'" in str(excinfo.value) 

@@ -16,8 +16,9 @@ async def test_remote_streaming_execution():
     Tests end-to-end remote streaming execution of a node.
     """
     pipeline = Pipeline()
-    
-    remote_config = RemoteExecutorConfig(host="127.0.0.1", port=50052, ssl_enabled=False)
+    REMOTE_HOST = os.environ.get("REMOTE_HOST", "127.0.0.1")
+
+    remote_config = RemoteExecutorConfig(host=REMOTE_HOST, port=50052, ssl_enabled=False)
     node_config = {"initial_value": 100}
     
     pipeline.add_node(RemoteExecutionNode(

@@ -37,7 +37,7 @@ async def main():
     
     # 2. Use the pipeline with managed execution for setup/teardown
     try:
-        with pipeline.managed_execution():
+        async with pipeline.managed_execution():
             print(f"\nProcessing media stream from '{MEDIA_SOURCE_PATH}'...")
             
             frame_count = 0

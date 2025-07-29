@@ -359,7 +359,7 @@ async def test_custom_math_node():
         
         config = RemoteExecutorConfig(
             host='localhost',
-            port=50051,
+            port=50052,
             protocol='grpc',
             timeout=30.0,
             ssl_enabled=False
@@ -438,7 +438,7 @@ async def test_custom_text_node():
         
         config = RemoteExecutorConfig(
             host='localhost',
-            port=50051,
+            port=50052,
             protocol='grpc',
             timeout=30.0,
             ssl_enabled=False
@@ -512,7 +512,7 @@ async def test_hybrid_processing_node():
         
         config = RemoteExecutorConfig(
             host='localhost',
-            port=50051,
+            port=50052,
             protocol='grpc',
             timeout=30.0,
             ssl_enabled=False

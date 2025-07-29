@@ -6,6 +6,7 @@ for example by reading from a file, network stream, or hardware device.
 """
 import asyncio
 import logging
+import os
 from typing import AsyncGenerator, Any
 
 import numpy as np
@@ -88,30 +89,42 @@ class MediaReaderNode(Node):
             item = await queue.get()
             if item is _sentinel:
                 finished_tracks += 1
-                logger.info(f"A track reader finished. {finished_tracks}/{len(tasks)} done.")
+                logger.debug(f"A track reader finished. {finished_tracks}/{len(tasks)} done.")
             else:
-                logger.debug("Yielding frame from queue.")
+                logger.debug(f"MediaReaderNode: Yielding frame from queue.")
                 yield item
         logger.info("All track readers have finished.")
 
 
 class TrackSource(Node):
     """
-    Base class for track source nodes.
+    Base class for track source nodes that extract a specific track from a
+    stream of mixed-media dictionaries.
     """
+    # Subclasses should override these
+    _track_type: str = ""
+    _frame_type: type = Frame
 
     def process(self, data: Any) -> Any:
         """
-        Processes an av frame.
-        Expects `data` to be an `av.frame.Frame` (AudioFrame or VideoFrame).
+        Processes input data, expecting a dictionary like `{'audio': frame}`.
+        It extracts the frame for the specific track type and processes it.
         """
-        if not isinstance(data, Frame):
+        if not isinstance(data, dict) or self._track_type not in data:
+            # Not the data this track is looking for, ignore silently.
+            return None
+
+        frame = data[self._track_type]
+
+        if not isinstance(frame, self._frame_type):
             logger.warning(
-                f"{self.__class__.__name__} '{self.name}': received data in "
-                "unexpected format. Expected an av.frame.Frame."
+                f"{self.__class__.__name__} '{self.name}': received data for track "
+                f"'{self._track_type}' with unexpected frame type {type(frame)}."
             )
             return None
-        return self._process_frame(data)
+        
+        logger.debug(f"{self.__class__.__name__}: Processing frame.")
+        return self._process_frame(frame)
 
     def _process_frame(self, frame: Frame) -> Any:
         raise NotImplementedError
@@ -121,6 +134,8 @@ class AudioTrackSource(TrackSource):
     """
     An audio track source node that converts `av.AudioFrame` objects into NumPy arrays.
     """
+    _track_type = "audio"
+    _frame_type = AudioFrame
 
     def _process_frame(self, frame: AudioFrame) -> Any:
         """
@@ -135,6 +150,12 @@ class AudioTrackSource(TrackSource):
         """
         try:
             audio_data = frame.to_ndarray()
+            # Normalize and convert to float32, as expected by librosa
+            if audio_data.dtype == np.int16:
+                audio_data = audio_data.astype(np.float32) / 32768.0
+            elif audio_data.dtype == np.int32:
+                audio_data = audio_data.astype(np.float32) / 2147483648.0
+            
             logger.debug(
                 f"AudioTrackSource '{self.name}': processed audio frame with "
                 f"{frame.samples} samples at {frame.sample_rate}Hz."
@@ -149,6 +170,8 @@ class VideoTrackSource(TrackSource):
     """
     A video track source node that converts `av.VideoFrame` objects into NumPy arrays.
     """
+    _track_type = "video"
+    _frame_type = VideoFrame
 
     def __init__(self, output_format: str = "bgr24", **kwargs):
         """
@@ -177,10 +200,87 @@ class VideoTrackSource(TrackSource):
                 f"VideoTrackSource '{self.name}': processed video frame with "
                 f"resolution {frame.width}x{frame.height}."
             )
-            return video_data
+            return (video_data, frame.pts)
         except Exception as e:
             logger.error(f"Error converting video frame to numpy array: {e}")
             return None
 
 
-__all__ = ["MediaReaderNode", "AudioTrackSource", "VideoTrackSource", "TrackSource"] 
+class LocalMediaReaderNode(Node):
+    """
+    A robust media reader that uses PyAV directly to stream frames from a
+    local media file, offering better compatibility than aiortc.MediaPlayer.
+    """
+    def __init__(self, path: str, **kwargs):
+        super().__init__(**kwargs)
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"Media file not found at path: {path}")
+        self.path = path
+        self._queue = asyncio.Queue(maxsize=100)
+        self._producer_task = None
+
+    async def _produce_frames_blocking(self):
+        """
+        Internal method that runs in a separate thread to read the file
+        and put frames onto the queue, without blocking the main event loop.
+        """
+        try:
+            import av
+            container = av.open(self.path)
+            video_stream = next((s for s in container.streams if s.type == 'video'), None)
+            audio_stream = next((s for s in container.streams if s.type == 'audio'), None)
+
+            if not video_stream and not audio_stream:
+                logger.warning(f"No audio or video streams found in '{self.path}'")
+                return
+
+            logger.info(f"Producer starting to stream from '{self.path}'...")
+            for packet in container.demux(video=0 if video_stream else (), audio=0 if audio_stream else ()):
+                for frame in packet.decode():
+                    item = None
+                    if isinstance(frame, av.VideoFrame):
+                        item = {'video': frame}
+                    elif isinstance(frame, av.AudioFrame):
+                        item = {'audio': frame}
+                    
+                    if item:
+                        # This is a thread-safe way to put items into an asyncio queue
+                        asyncio.run_coroutine_threadsafe(self._queue.put(item), asyncio.get_running_loop()).result()
+
+            logger.info("Producer finished streaming file.")
+        except Exception as e:
+            logger.error(f"Error in media file producer: {e}", exc_info=True)
+        finally:
+            asyncio.run_coroutine_threadsafe(self._queue.put(None), asyncio.get_running_loop()).result() # Sentinel
+
+    async def initialize(self):
+        """Start the producer task in a thread."""
+        await super().initialize()
+        loop = asyncio.get_running_loop()
+        self._producer_task = loop.run_in_executor(
+            None, # Use default ThreadPoolExecutor
+            self._produce_frames_blocking
+        )
+
+    async def process(self, data: Any = None) -> AsyncGenerator[Any, None]:
+        """Yields frames from the internal queue."""
+        if not self._producer_task:
+            raise RuntimeError("Producer task was not started. Call initialize() first.")
+
+        while True:
+            frame = await self._queue.get()
+            if frame is None: # Sentinel reached
+                break
+            yield frame
+            # A small sleep is still good for backpressure
+            await asyncio.sleep(0.001)
+
+    async def cleanup(self):
+        """Ensure the producer task is handled on cleanup."""
+        if self._producer_task and not self._producer_task.done():
+            # The producer will finish on its own, but we could cancel if needed
+            pass
+        await super().cleanup()
+
+
+__all__ = ["MediaReaderNode", "AudioTrackSource", "VideoTrackSource", "TrackSource", "LocalMediaReaderNode"] 

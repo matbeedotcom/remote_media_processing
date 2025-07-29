@@ -30,19 +30,24 @@ class Pipeline:
     run remotely, and managing the overall processing workflow.
     """
     
-    def __init__(self, name: Optional[str] = None):
+    def __init__(self, nodes: Optional[List[Node]] = None, name: Optional[str] = None):
         """
         Initialize a new pipeline.
         
         Args:
+            nodes: Optional list of nodes to initialize the pipeline with.
             name: Optional name for the pipeline
         """
         self.name = name or f"Pipeline_{id(self)}"
         self.nodes: List[Node] = []
         self._is_initialized = False
         self.logger = logging.getLogger(self.__class__.__name__)
+
+        if nodes:
+            for node in nodes:
+                self.add_node(node)
         
-        self.logger.info(f"Created pipeline: {self.name}")
+        self.logger.info(f"Created pipeline: {self}")
     
     def add_node(self, node: Node) -> "Pipeline":
         """
@@ -64,7 +69,7 @@ class Pipeline:
             raise PipelineError(f"Expected Node instance, got {type(node)}")
         
         self.nodes.append(node)
-        self.logger.debug(f"Added node '{node.name}' to pipeline '{self.name}'")
+        self.logger.info(f"Added node '{node.name}' to pipeline '{self.name}'")
         
         return self
     
@@ -87,7 +92,7 @@ class Pipeline:
         for i, node in enumerate(self.nodes):
             if node.name == node_name:
                 removed_node = self.nodes.pop(i)
-                self.logger.debug(f"Removed node '{removed_node.name}' from pipeline '{self.name}'")
+                self.logger.info(f"Removed node '{removed_node.name}' from pipeline '{self.name}'")
                 return True
         
         return False
@@ -126,7 +131,7 @@ class Pipeline:
         
         try:
             for node in self.nodes:
-                self.logger.debug(f"Initializing node: {node.name}")
+                self.logger.info(f"Initializing node: {node.name}")
                 await node.initialize()
             
             self._is_initialized = True
@@ -138,40 +143,67 @@ class Pipeline:
             await self.cleanup()
             raise PipelineError(f"Pipeline initialization failed: {e}") from e
     
-    async def process(self, stream: AsyncGenerator[Any, None]) -> AsyncGenerator[Any, None]:
+    async def process(self, stream: Optional[AsyncGenerator[Any, None]] = None) -> AsyncGenerator[Any, None]:
         """
         Process a stream of data through the pipeline asynchronously and in parallel.
 
-        This method sets up a series of unbounded queues and threaded workers,
-        one for each node, allowing for concurrent processing of the data stream.
+        If `stream` is not provided, this method assumes the first node in the
+        pipeline is a source node (i.e., its `process` method returns an async
+        generator) and uses its output as the stream for the rest of the pipeline.
 
         Args:
-            stream: An async generator that yields data chunks for the pipeline.
+            stream: An optional async generator that yields data chunks for the pipeline.
 
         Yields:
             The final processed data item(s) from the end of the pipeline.
         """
         if not self._is_initialized:
             raise PipelineError("Pipeline must be initialized before processing")
+
         if not self.nodes:
             self.logger.warning("Cannot process data with an empty pipeline.")
             return
 
+        nodes_to_process = self.nodes
+        input_stream = stream
+
+        if input_stream is None:
+            # If no stream is provided, treat the first node as the source.
+            source_node = self.nodes[0]
+            source_output = source_node.process()
+
+            if not inspect.isasyncgen(source_output):
+                raise PipelineError(
+                    f"The first node '{source_node.name}' is not a valid source. "
+                    "Its process() method must return an async generator."
+                )
+
+            input_stream = source_output
+            nodes_to_process = self.nodes[1:]
+
+        # If there are no nodes left to process (e.g., pipeline had only a source),
+        # then we just yield the results from the source stream.
+        if not nodes_to_process:
+            async for item in input_stream:
+                yield item
+            return
+        
         loop = asyncio.get_running_loop()
-        queues = [asyncio.Queue(maxsize=0) for _ in range(len(self.nodes) + 1)]
-        executor = ThreadPoolExecutor(max_workers=len(self.nodes), thread_name_prefix='PipelineWorker')
+        queues = [asyncio.Queue(maxsize=0) for _ in range(len(nodes_to_process) + 1)]
+        executor = ThreadPoolExecutor(max_workers=len(nodes_to_process), thread_name_prefix='PipelineWorker')
 
         async def _worker(node: Node, in_queue: asyncio.Queue, out_queue: asyncio.Queue):
-            self.logger.debug(f"WORKER-START: '{node.name}'")
+            self.logger.info(f"WORKER-START: '{node.name}'")
             try:
                 while True:
                     item = await in_queue.get()
+                    self.logger.info(f"WORKER-GET: '{node.name}' received item from queue.")
                     if item is _SENTINEL:
-                        self.logger.debug(f"WORKER-SENTINEL: '{node.name}'")
+                        self.logger.info(f"WORKER-SENTINEL: '{node.name}'")
 
                         # Flush the node if it has a flush method
                         if hasattr(node, 'flush') and callable(getattr(node, 'flush')):
-                            self.logger.debug(f"WORKER-FLUSH: Flushing node '{node.name}'")
+                            self.logger.info(f"WORKER-FLUSH: Flushing node '{node.name}'")
                             flush_method = getattr(node, 'flush')
                             if inspect.iscoroutinefunction(flush_method):
                                 flushed_result = await flush_method()
@@ -179,56 +211,93 @@ class Pipeline:
                                 flushed_result = await loop.run_in_executor(executor, flush_method)
                             
                             if flushed_result is not None:
-                                self.logger.debug(f"WORKER-FLUSH-RESULT: '{node.name}' produced output.")
+                                self.logger.info(f"WORKER-FLUSH-RESULT: '{node.name}' produced output.")
                                 await out_queue.put(flushed_result)
 
                         await out_queue.put(_SENTINEL)
                         break
                     
                     # Run the node's process method
-                    if inspect.iscoroutinefunction(node.process):
+                    if inspect.isasyncgenfunction(node.process):
+                        async for result in node.process(item):
+                            if result is not None:
+                                self.logger.info(f"WORKER-RESULT: '{node.name}' produced output.")
+                                await out_queue.put(result)
+                    elif inspect.iscoroutinefunction(node.process):
                         result = await node.process(item)
+                        if result is not None:
+                            self.logger.info(f"WORKER-RESULT: '{node.name}' produced output.")
+                            await out_queue.put(result)
                     else:
                         result = await loop.run_in_executor(executor, node.process, item)
-                    
-                    if result is not None:
-                        self.logger.debug(f"WORKER-RESULT: '{node.name}' produced output.")
-                        await out_queue.put(result)
+                        if result is not None:
+                            self.logger.info(f"WORKER-RESULT: '{node.name}' produced output.")
+                            await out_queue.put(result)
+
             except Exception as e:
                 self.logger.error(f"WORKER-ERROR: in '{node.name}': {e}", exc_info=True)
                 await out_queue.put(_SENTINEL)
             finally:
-                self.logger.debug(f"WORKER-FINISH: '{node.name}'")
+                self.logger.info(f"WORKER-FINISH: '{node.name}'")
 
         async def _streaming_worker(node: Node, in_queue: asyncio.Queue, out_queue: asyncio.Queue):
-            self.logger.debug(f"STREAMING-WORKER-START: '{node.name}'")
-            try:
-                # The node's process method will take the input queue and return an async gen
-                async def in_stream():
+            self.logger.info(f"STREAMING-WORKER-START: '{node.name}'")
+            
+            # Create a secondary queue to act as a buffer and signaling mechanism
+            internal_queue = asyncio.Queue(1)
+            
+            async def feeder():
+                """Task to feed the internal queue from the main input queue."""
+                try:
                     while True:
                         item = await in_queue.get()
+                        self.logger.debug(f"STREAMING-WORKER-FEED: '{node.name}' got item from input queue")
+                        await internal_queue.put(item)
                         if item is _SENTINEL:
                             break
-                        yield item
+                except Exception as e:
+                    self.logger.error(f"STREAMING-WORKER-FEED-ERROR: in '{node.name}': {e}", exc_info=True)
+                    await internal_queue.put(_SENTINEL)
 
-                # The process method of a streaming node is an async generator
-                # that takes an async generator as input.
+            feeder_task = asyncio.create_task(feeder())
+
+            try:
+                # The node's process method will take the input from the internal queue
+                async def in_stream():
+                    try:
+                        while True:
+                            item = await internal_queue.get()
+                            self.logger.debug(f"STREAMING-WORKER-STREAM: '{node.name}' got item from internal queue")
+                            if item is _SENTINEL:
+                                break
+                            yield item
+                    except Exception as e:
+                        self.logger.error(f"STREAMING-WORKER-STREAM-ERROR: in '{node.name}': {e}", exc_info=True)
+
                 if inspect.isasyncgenfunction(node.process):
+                    self.logger.debug(f"STREAMING-WORKER-PROCESS: '{node.name}' starting process")
                     async for result in node.process(in_stream()):
                         if result is not None:
+                            self.logger.debug(f"STREAMING-WORKER-RESULT: '{node.name}' produced output")
                             await out_queue.put(result)
-
-                # Signal completion
+                
                 await out_queue.put(_SENTINEL)
 
             except Exception as e:
                 self.logger.error(f"STREAMING-WORKER-ERROR: in '{node.name}': {e}", exc_info=True)
                 await out_queue.put(_SENTINEL)
             finally:
-                self.logger.debug(f"STREAMING-WORKER-FINISH: '{node.name}'")
+                # Wait for the feeder task to complete or cancel it
+                if not feeder_task.done():
+                    feeder_task.cancel()
+                    try:
+                        await feeder_task
+                    except asyncio.CancelledError:
+                        pass
+                self.logger.info(f"STREAMING-WORKER-FINISH: '{node.name}'")
 
         tasks = []
-        for i, node in enumerate(self.nodes):
+        for i, node in enumerate(nodes_to_process):
             if getattr(node, 'is_streaming', False):
                 task = asyncio.create_task(
                     _streaming_worker(node, queues[i], queues[i+1])
@@ -241,25 +310,27 @@ class Pipeline:
 
         try:
             # Feeder: Puts data from the input stream into the first queue
-            self.logger.debug("FEEDER-START")
-            async for item in stream:
+            self.logger.info("PIPELINE-FEEDER: Feeder starting.")
+            async for item in input_stream:
+                self.logger.info("PIPELINE-FEEDER: Putting item into first queue.")
                 await queues[0].put(item)
             await queues[0].put(_SENTINEL)
-            self.logger.debug("FEEDER-FINISH")
+            self.logger.info("PIPELINE-FEEDER: Feeder finished.")
 
             # Consumer: Yields results from the final queue
-            output_queue = queues[-1]
+            final_queue = queues[-1]
             while True:
-                result = await output_queue.get()
+                result = await final_queue.get()
+                self.logger.info("CONSUMER: Got item from final queue.")
                 if result is _SENTINEL:
-                    self.logger.debug("CONSUMER-SENTINEL: Got sentinel.")
+                    self.logger.info("CONSUMER: Got sentinel, breaking.")
                     break
                 yield result
-            self.logger.debug("CONSUMER-FINISH")
         finally:
-            self.logger.debug("PIPELINE-CLEANUP")
+            # Ensure all worker tasks are cancelled
             for task in tasks:
-                task.cancel()
+                if not task.done():
+                    task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
             executor.shutdown(wait=False)
     
@@ -278,7 +349,7 @@ class Pipeline:
                 self.logger.warning(f"Error cleaning up node '{node.name}': {e}")
         
         self._is_initialized = False
-        self.logger.debug(f"Pipeline '{self.name}' cleanup completed")
+        self.logger.info(f"Pipeline '{self.name}' cleanup completed")
     
     @asynccontextmanager
     async def managed_execution(self):

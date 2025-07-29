@@ -14,6 +14,7 @@ import cloudpickle
 from ..core.exceptions import RemoteExecutionError
 from ..core.node import RemoteExecutorConfig
 from ..serialization import JSONSerializer, PickleSerializer
+from ..packaging.code_packager import CodePackager
 
 # These will be generated from the proto files
 try:
@@ -235,13 +236,15 @@ class RemoteExecutionClient:
     
     async def stream_object(
         self,
-        obj: Any,
         config: Dict[str, Any],
         input_stream: AsyncGenerator[Any, None],
-        serialization_format: str = "pickle"
+        serialization_format: str = "pickle",
+        obj: Optional[Any] = None,
+        session_id: Optional[str] = None,
     ) -> AsyncGenerator[Any, None]:
         """
         Execute a serialized object with a streaming input/output.
+        Can either create a new object or stream to an existing one via session_id.
         """
         if not self.stub:
             raise RemoteExecutionError("Not connected to remote service")
@@ -251,16 +254,27 @@ class RemoteExecutionClient:
             raise ValueError(f"Unknown serialization format: {serialization_format}")
 
         string_config = {k: str(v) for k, v in config.items()}
-        serialized_obj = cloudpickle.dumps(obj)
 
         async def request_generator():
-            init_message = execution_pb2.StreamObjectInit(
-                serialized_object=serialized_obj,
-                config=string_config,
-                serialization_format=serialization_format
-            )
-            yield execution_pb2.StreamObjectRequest(init=init_message)
+            # First, send the initialization message
+            init_kwargs = {
+                "config": string_config,
+                "serialization_format": serialization_format
+            }
+            
+            if session_id:
+                init_kwargs["session_id"] = session_id
+            elif obj is not None:
+                packager = CodePackager()
+                init_kwargs["code_package"] = packager.package_object(obj)
+            else:
+                raise ValueError("Either obj or session_id must be provided.")
 
+            init_message = execution_pb2.StreamObjectInit(**init_kwargs)
+            init_request = execution_pb2.StreamObjectRequest(init=init_message)
+            yield init_request
+
+            # Then, send the data chunks
             async for item in input_stream:
                 serialized_data = serializer.serialize(item)
                 yield execution_pb2.StreamObjectRequest(data=serialized_data)
@@ -269,13 +283,66 @@ class RemoteExecutionClient:
             async for response in self.stub.StreamObject(request_generator()):
                 if response.HasField("error"):
                     raise RemoteExecutionError(f"Remote stream error: {response.error}")
-                
-                output_data = serializer.deserialize(response.data)
-                yield output_data
-        
+                if response.HasField("data"):
+                    output_data = serializer.deserialize(response.data)
+                    yield output_data
+
         except grpc.aio.AioRpcError as e:
             logger.error(f"gRPC stream error in stream_object: {e}")
             raise RemoteExecutionError(f"gRPC stream failed: {e}") from e
+        except Exception as e:
+            logger.error(f"Error in stream_object: {e}", exc_info=True)
+            raise RemoteExecutionError(f"Stream failed: {e}") from e
+
+    async def execute_object_method(
+        self,
+        obj: Any,
+        method_name: str,
+        method_args: List[Any],
+        serialization_format: str = "pickle",
+        session_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Execute a method on a serialized object remotely using session management.
+        """
+        if not self.stub:
+            raise RemoteExecutionError("Not connected to remote service")
+
+        serializer = self.serializers.get(serialization_format)
+        if not serializer:
+            raise ValueError(f"Unknown serialization format: {serialization_format}")
+        
+        serialized_args = serializer.serialize(method_args)
+
+        request_args = {
+            "serialization_format": serialization_format,
+            "method_name": method_name,
+            "method_args_data": serialized_args
+        }
+
+        if session_id:
+            request_args["session_id"] = session_id
+        else:
+            packager = CodePackager()
+            code_package = packager.package_object(obj)
+            request_args["code_package"] = code_package
+
+        request = execution_pb2.ExecuteObjectMethodRequest(**request_args)
+
+        try:
+            response = await self.stub.ExecuteObjectMethod(request)
+            if response.status != types_pb2.EXECUTION_STATUS_SUCCESS:
+                raise RemoteExecutionError(response.error_message, response.error_traceback)
+            
+            result = serializer.deserialize(response.result_data)
+            
+            return {
+                "result": result,
+                "session_id": response.session_id
+            }
+        except Exception as e:
+            logger.error(f"Error executing remote object method: {e}")
+            raise
 
     async def execute_custom_task(
         self,

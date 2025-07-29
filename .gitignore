@@ -153,3 +153,4 @@ tmp/
 # Remote service Docker files (will be created later)
 remote_service/build/
 remote_service/logs/ 
+generated_responses/

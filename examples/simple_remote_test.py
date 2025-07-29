@@ -42,7 +42,7 @@ async def test_connection():
 
     config = RemoteExecutorConfig(
         host="localhost",
-        port=50051,
+        port=50052,
         protocol="grpc",
         timeout=30.0,
         ssl_enabled=False
@@ -71,7 +71,7 @@ async def test_node_execution():
 
     config = RemoteExecutorConfig(
         host="localhost",
-        port=50051,
+        port=50052,
         protocol="grpc",
         timeout=30.0,
         ssl_enabled=False
@@ -120,7 +120,7 @@ async def test_calculator_simulation():
     # Simulate remote execution
     config = RemoteExecutorConfig(
         host="localhost",
-        port=50051,
+        port=50052,
         protocol="grpc",
         timeout=30.0,
         ssl_enabled=False
@@ -205,11 +205,11 @@ def main():
         print("Simple Remote Execution Test")
         print("Usage: python simple_remote_test.py [--help]")
         print("\nTests the remote execution service.")
-        print("Make sure service is running on localhost:50051")
+        print("Make sure service is running on localhost:50052")
         return 0
 
     print("Starting tests...")
-    print("Make sure remote service is running on localhost:50051")
+    print("Make sure remote service is running on localhost:50052")
     print("Start with: cd remote_service && ./scripts/run.sh")
     print()
 

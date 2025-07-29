@@ -5,7 +5,7 @@ import warnings
 
 import execution_pb2 as execution__pb2
 
-GRPC_GENERATED_VERSION = '1.73.0'
+GRPC_GENERATED_VERSION = '1.74.0'
 GRPC_VERSION = grpc.__version__
 _version_not_supported = False
 
@@ -56,6 +56,11 @@ class RemoteExecutionServiceStub(object):
                 request_serializer=execution__pb2.StreamObjectRequest.SerializeToString,
                 response_deserializer=execution__pb2.StreamObjectResponse.FromString,
                 _registered_method=True)
+        self.ExecuteObjectMethod = channel.unary_unary(
+                '/remotemedia.execution.RemoteExecutionService/ExecuteObjectMethod',
+                request_serializer=execution__pb2.ExecuteObjectMethodRequest.SerializeToString,
+                response_deserializer=execution__pb2.ExecuteObjectMethodResponse.FromString,
+                _registered_method=True)
         self.GetStatus = channel.unary_unary(
                 '/remotemedia.execution.RemoteExecutionService/GetStatus',
                 request_serializer=execution__pb2.StatusRequest.SerializeToString,
@@ -101,6 +106,13 @@ class RemoteExecutionServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def ExecuteObjectMethod(self, request, context):
+        """Execute a method on a serialized object
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def GetStatus(self, request, context):
         """Get service status and health information
         """
@@ -137,6 +149,11 @@ def add_RemoteExecutionServiceServicer_to_server(servicer, server):
                     servicer.StreamObject,
                     request_deserializer=execution__pb2.StreamObjectRequest.FromString,
                     response_serializer=execution__pb2.StreamObjectResponse.SerializeToString,
+            ),
+            'ExecuteObjectMethod': grpc.unary_unary_rpc_method_handler(
+                    servicer.ExecuteObjectMethod,
+                    request_deserializer=execution__pb2.ExecuteObjectMethodRequest.FromString,
+                    response_serializer=execution__pb2.ExecuteObjectMethodResponse.SerializeToString,
             ),
             'GetStatus': grpc.unary_unary_rpc_method_handler(
                     servicer.GetStatus,
@@ -259,6 +276,33 @@ class RemoteExecutionService(object):
             '/remotemedia.execution.RemoteExecutionService/StreamObject',
             execution__pb2.StreamObjectRequest.SerializeToString,
             execution__pb2.StreamObjectResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ExecuteObjectMethod(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/remotemedia.execution.RemoteExecutionService/ExecuteObjectMethod',
+            execution__pb2.ExecuteObjectMethodRequest.SerializeToString,
+            execution__pb2.ExecuteObjectMethodResponse.FromString,
             options,
             channel_credentials,
             insecure,

@@ -19,6 +19,9 @@ service RemoteExecutionService {
   // Bidirectional streaming for serialized objects
   rpc StreamObject(stream StreamObjectRequest) returns (stream StreamObjectResponse);
   
+  // Execute a method on a serialized object
+  rpc ExecuteObjectMethod(ExecuteObjectMethodRequest) returns (ExecuteObjectMethodResponse);
+  
   // Get service status and health information
   rpc GetStatus(StatusRequest) returns (StatusResponse);
   
@@ -102,9 +105,33 @@ message StreamObjectResponse {
 
 // Message to initialize a serialized object streaming session
 message StreamObjectInit {
-  bytes serialized_object = 1;      // The cloudpickled object
-  map<string, string> config = 2;   // The configuration for the node
-  string serialization_format = 3;   // The serialization format for data payloads
+  oneof object_specifier {
+    bytes code_package = 1;           // Packaged user code (zip archive)
+    string session_id = 2;            // Session ID for existing objects
+  }
+  map<string, string> config = 3;     // The configuration for the node
+  string serialization_format = 4;    // The serialization format for data payloads
+}
+
+// Request to execute a method on a serialized object
+message ExecuteObjectMethodRequest {
+    oneof object_specifier {
+        bytes code_package = 1; // Used for the first call to initialize the session
+        string session_id = 2;   // Used for subsequent calls
+    }
+    map<string, string> config = 3;
+    string serialization_format = 4;
+    string method_name = 5;
+    bytes method_args_data = 6; // Serialized arguments
+}
+
+// Response from executing a method on a serialized object
+message ExecuteObjectMethodResponse {
+    ExecutionStatus status = 1;
+    bytes result_data = 2; // Serialized result
+    string error_message = 3;
+    string error_traceback = 4;
+    string session_id = 5; // Returned on the first call, confirms the session
 }
 
 // Streaming session close response

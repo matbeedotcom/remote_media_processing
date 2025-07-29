@@ -42,7 +42,7 @@ async def test_passthrough_node():
     
     config = RemoteExecutorConfig(
         host='localhost', 
-        port=50051, 
+        port=50052, 
         protocol='grpc', 
         timeout=30.0, 
         ssl_enabled=False
@@ -86,7 +86,7 @@ async def test_calculator_node():
     
     config = RemoteExecutorConfig(
         host='localhost', 
-        port=50051, 
+        port=50052, 
         protocol='grpc', 
         timeout=30.0, 
         ssl_enabled=False
@@ -131,7 +131,7 @@ async def test_code_executor_node():
     
     config = RemoteExecutorConfig(
         host='localhost', 
-        port=50051, 
+        port=50052, 
         protocol='grpc', 
         timeout=30.0, 
         ssl_enabled=False
@@ -294,7 +294,7 @@ result = {{
     
     config = RemoteExecutorConfig(
         host='localhost', 
-        port=50051, 
+        port=50052, 
         protocol='grpc', 
         timeout=30.0, 
         ssl_enabled=False

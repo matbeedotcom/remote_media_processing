@@ -15,7 +15,7 @@ import socket
 from pathlib import Path
 
 
-def check_service_running(host="localhost", port=50051):
+def check_service_running(host="localhost", port=50052):
     """Check if the remote service is running."""
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -27,7 +27,7 @@ def check_service_running(host="localhost", port=50051):
         return False
 
 
-def wait_for_service(host="localhost", port=50051, timeout=30):
+def wait_for_service(host="localhost", port=50052, timeout=30):
     """Wait for the service to become available."""
     print(f"Waiting for service on {host}:{port}...")
     

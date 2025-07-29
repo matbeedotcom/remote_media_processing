@@ -7,7 +7,9 @@
 
 **1. Introduction & Vision**
 
-This document outlines the strategy for developing a Python-based Software Development Kit (SDK) designed for building distributed audio/video/data processing pipelines. The core vision is to empower developers to create complex, real-time processing applications that can seamlessly offload computationally intensive tasks—including user-defined Python code with local dependencies—to a remote execution service, ideally managed by an SDK-provided Docker image or a developer-controlled equivalent.
+This document outlines the strategy for developing a Python-based Software Development Kit (SDK) designed for building distributed audio/video/data processing pipelines. The core vision is to empower developers to create complex, real-time processing applications that can seamlessly offload computationally intensive tasks—including user-defined Python code with local dependencies—to a remote execution service.
+
+A key differentiator of this SDK is its **unified streaming architecture**. It allows arbitrary, `cloudpickle`-serialized Python objects to be executed on a remote server with full, bidirectional streaming capabilities. This enables developers to treat remote, dynamically-defined functions as if they were local, streaming-first components in a processing pipeline, providing unparalleled flexibility for real-time applications.
 
 The SDK aims to handle the complexities of WebRTC communication, data synchronization, and remote execution, providing a transparent and intuitive experience for the developer.
 
@@ -48,7 +50,9 @@ The system will consist of two main parts: the Client-Side SDK and the Remote Ex
 * **Remote Execution Client:**
     * Component within the SDK responsible for communicating with the Remote Execution Service.
     * Handles serialization of code/data, gRPC calls, and deserialization of results.
-    * Manages bidirectional streaming for continuous data/updates.
+    * Manages bidirectional streaming for continuous data/updates via two primary RPCs:
+        * `StreamNode`: For pre-registered, known SDK nodes.
+        * `StreamObject`: For arbitrary, `cloudpickle`-serialized objects.
 * **Code & Dependency Packager:**
     * For user-defined remote nodes, this component will:
         * Use `cloudpickle` to serialize the user's Python object instance.
@@ -62,15 +66,19 @@ The system will consist of two main parts: the Client-Side SDK and the Remote Ex
 * **Built-in Node Library:**
     * Pre-defined nodes for common A/V tasks (format conversion, VAD, buffering).
     * Pre-defined nodes for ML models (Whisper, YOLO, SAM), capable of local or remote execution.
+    * Special nodes for remote execution:
+        * `RemoteExecutionNode`: Executes a pre-registered SDK node remotely via streaming.
+        * `RemoteObjectExecutionNode`: Executes an arbitrary, `cloudpickle`-serialized object remotely via streaming.
+        * `SerializedClassExecutorNode`: Executes a single method on a `cloudpickle`-serialized object (non-streaming, unary call).
 * **Serialization Utilities:**
     * Standardized methods for serializing/deserializing various data types (NumPy arrays, audio/video frames, structured data) for gRPC and WebRTC.
 
 **4.2. Remote Execution Service (SDK-Provided Docker Image)**
 
 * **gRPC Server Interface:**
-    * Exposes RPC methods (e.g., `ExecuteNode`, `ExecuteCustomTask`) for receiving execution requests.
+    * Exposes RPC methods (e.g., `ExecuteNode`, `StreamNode`, `StreamObject`) for receiving execution requests.
     * Defined using Protocol Buffers (`.proto` files).
-    * Supports bidirectional streaming.
+    * Supports both unary and bidirectional streaming calls.
 * **Task Intake & Unpacking:**
     * Receives task packages (e.g., zip archives for custom code, or node identifier + config for SDK nodes).
     * Unpacks code, dependencies, and configuration into an isolated sandbox.
@@ -150,7 +158,7 @@ This complex project will be developed in phases:
 
 * **Objective:** Enhance real-time capabilities, improve robustness, and add production-grade features.
 * **Key Deliverables:**
-    * Full bidirectional gRPC streaming support for continuous data flow to/from remote nodes (e.g., streaming audio for transcription, intermediate results).
+    * **(COMPLETED)** Full bidirectional gRPC streaming support for continuous data flow to/from remote nodes, including for arbitrary `cloudpickle`-serialized objects.
     * Advanced A/V synchronization mechanisms over WebRTC, handling jitter and latency.
     * Remote Execution Service:
         * (If Phase 3 proves viable for pip) Experimental support for on-demand `pip install` of user-specified requirements in the sandbox (with caching).
