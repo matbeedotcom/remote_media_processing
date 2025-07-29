@@ -160,8 +160,9 @@
                 <video id="localVideo" autoplay muted width="320" height="240"></video>
             </div>
             <div class="video-box">
-                <h3>Remote Video</h3>
+                <h3>Remote Video/Audio</h3>
                 <video id="remoteVideo" autoplay width="320" height="240"></video>
+                <audio id="remoteAudio" autoplay controls style="width: 320px; margin-top: 10px;"></audio>
             </div>
         </div>
         
@@ -186,6 +187,7 @@
         // DOM elements
         const localVideo = document.getElementById('localVideo');
         const remoteVideo = document.getElementById('remoteVideo');
+        const remoteAudio = document.getElementById('remoteAudio');
         const startBtn = document.getElementById('startBtn');
         const stopBtn = document.getElementById('stopBtn');
         const status = document.getElementById('status');
@@ -265,7 +267,24 @@
                 pc.ontrack = (event) => {
                     addMessage('📺 Received remote track: ' + event.track.kind);
                     if (event.streams && event.streams[0]) {
-                        remoteVideo.srcObject = event.streams[0];
+                        if (event.track.kind === 'audio') {
+                            // For audio tracks, use the dedicated audio element
+                            addMessage('🔊 Setting up remote audio stream...');
+                            remoteAudio.srcObject = event.streams[0];
+                            // Ensure audio plays (unmute if needed)
+                            remoteAudio.muted = false;
+                            remoteAudio.volume = 1.0;
+                            addMessage('🔊 Remote audio track ready for playback');
+                            
+                            // Also add to video element for fallback
+                            if (!remoteVideo.srcObject) {
+                                remoteVideo.srcObject = event.streams[0];
+                                remoteVideo.muted = false;
+                            }
+                        } else {
+                            // For video tracks
+                            remoteVideo.srcObject = event.streams[0];
+                        }
                     }
                 };
 
@@ -304,7 +323,14 @@
                 dataChannel.onmessage = (event) => {
                     try {
                         const data = JSON.parse(event.data);
-                        addMessage(`Server: ${data.message || data}`, 'received');
+                        
+                        if (data.type === 'text_response') {
+                            // Handle text response
+                            addMessage(`💬 Server: ${data.text}`, 'received');
+                        } else {
+                            // Handle other messages
+                            addMessage(`Server: ${data.message || JSON.stringify(data)}`, 'received');
+                        }
                     } catch (e) {
                         addMessage(`Server: ${event.data}`, 'received');
                     }

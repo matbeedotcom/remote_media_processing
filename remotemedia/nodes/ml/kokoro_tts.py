@@ -123,14 +123,25 @@ class KokoroTTSNode(Node):
             # Extract text from various input formats
             text = self._extract_text(text_data)
             if text:
+                logger.info(f"🎙️ Kokoro TTS: Starting synthesis for text: '{text[:100]}{'...' if len(text) > 100 else ''}'")
+                
                 if self.stream_chunks:
                     # Stream individual audio chunks
+                    chunk_count = 0
+                    total_audio_duration = 0.0
                     async for audio_chunk in self._synthesize_streaming(text):
+                        chunk_count += 1
+                        chunk_duration = audio_chunk[0].shape[-1] / self.sample_rate
+                        total_audio_duration += chunk_duration
+                        logger.info(f"🎙️ Kokoro TTS: Streaming chunk {chunk_count}, duration={chunk_duration:.2f}s, total={total_audio_duration:.2f}s")
                         yield audio_chunk
+                    logger.info(f"🎙️ Kokoro TTS: Completed synthesis - {chunk_count} chunks, total={total_audio_duration:.2f}s")
                 else:
                     # Generate complete audio for this text
                     audio_result = await self._process_single(text)
                     if audio_result:
+                        duration = audio_result[0].shape[-1] / self.sample_rate
+                        logger.info(f"🎙️ Kokoro TTS: Generated complete audio: {duration:.2f}s")
                         yield audio_result
     
     async def _process_single(self, data: Any) -> Optional[Tuple[np.ndarray, int]]:
@@ -186,14 +197,18 @@ class KokoroTTSNode(Node):
     async def _synthesize_streaming(self, text: str) -> AsyncGenerator[Tuple[np.ndarray, int], None]:
         """Generate audio chunks for the given text."""
         try:
+            logger.info(f"🎙️ Kokoro TTS: Starting streaming synthesis for: '{text[:50]}{'...' if len(text) > 50 else ''}'")
+            
             # Run synthesis in a thread to avoid blocking
             generator = await asyncio.to_thread(
                 self._create_generator, text
             )
             
             # Process each generated chunk
+            chunk_count = 0
+            total_samples = 0
             for i, (graphemes, phonemes, audio) in enumerate(generator):
-                logger.debug(f"Kokoro TTS: Generated chunk {i}, graphemes='{graphemes[:50]}...', audio_shape={audio.shape if hasattr(audio, 'shape') else len(audio)}")
+                chunk_count += 1
                 
                 # Ensure audio is a numpy array
                 if not isinstance(audio, np.ndarray):
@@ -206,7 +221,17 @@ class KokoroTTSNode(Node):
                     audio = audio.reshape(-1)  # Flatten to 1D
                     audio = audio.reshape(1, -1)  # Then add channel dimension
                 
+                chunk_samples = audio.shape[-1]
+                total_samples += chunk_samples
+                chunk_duration = chunk_samples / self.sample_rate
+                total_duration = total_samples / self.sample_rate
+                
+                logger.info(f"🎙️ Kokoro TTS: Chunk {chunk_count}: '{graphemes[:30]}{'...' if len(graphemes) > 30 else ''}' "
+                          f"-> {chunk_duration:.2f}s ({chunk_samples} samples) | Total: {total_duration:.2f}s")
+                
                 yield (audio, self.sample_rate)
+                
+            logger.info(f"🎙️ Kokoro TTS: Synthesis complete - {chunk_count} chunks, {total_duration:.2f}s total audio")
                 
         except Exception as e:
             logger.error(f"Error during Kokoro TTS synthesis: {e}")

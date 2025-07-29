@@ -255,6 +255,9 @@ class WebRTCServer:
             connection = WebRTCConnection(connection_id, pc, self.pipeline_factory)
             self.connections[connection_id] = connection
             
+            # Initialize pipeline BEFORE setting up event handlers
+            await connection.initialize_pipeline()
+            
             # Set up event handlers
             self._setup_peer_connection_handlers(connection)
             
@@ -265,8 +268,10 @@ class WebRTCServer:
             )
             await pc.setRemoteDescription(offer)
             
-            # Initialize pipeline if factory is available
-            await connection.initialize_pipeline()
+            # Add audio output track for sending generated audio back to client
+            if connection.pipeline_processor and connection.pipeline_processor.audio_output_track:
+                pc.addTrack(connection.pipeline_processor.audio_output_track)
+                logger.info(f"Added audio output track to connection {connection_id}")
             
             # Create answer
             answer = await pc.createAnswer()
@@ -393,6 +398,9 @@ class WebRTCServer:
                 asyncio.create_task(
                     connection.pipeline_processor.add_track(track)
                 )
+                logger.info(f"Forwarded {track.kind} track to pipeline processor for {connection.connection_id}")
+            else:
+                logger.warning(f"No pipeline processor available for track {track.kind} on {connection.connection_id}")
             
             @track.on("ended")
             def on_ended():
