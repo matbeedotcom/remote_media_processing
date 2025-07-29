@@ -29,7 +29,7 @@ class UltravoxNode(Node):
                  model_id: str = "fixie-ai/ultravox-v0_5-llama-3_2-1b",
                  device: Optional[str] = None,
                  torch_dtype: str = "bfloat16",
-                 max_new_tokens: int = 100,
+                 max_new_tokens: int = 16382,
                  system_prompt: str = "You are a friendly and helpful AI assistant.",
                  **kwargs: Any) -> None:
         super().__init__(**kwargs)
