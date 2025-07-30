@@ -64,9 +64,130 @@ class RemoteExecutionServicer(execution_pb2_grpc.RemoteExecutionServiceServicer)
         self.error_count = 0
         self.active_sessions: Dict[str, Any] = {}
         self.object_sessions: Dict[str, Any] = {}
+        self.connection_objects: Dict[str, Dict[str, Any]] = {}  # Track objects per connection
+        self._cleanup_lock = asyncio.Lock()
         
         self.logger = logging.getLogger(__name__)
         self.logger.info("RemoteExecutionServicer initialized")
+        
+        # Start periodic cleanup task
+        asyncio.create_task(self._periodic_cleanup())
+    
+    def _get_peer_info(self, context: grpc.aio.ServicerContext) -> str:
+        """Get a unique identifier for the peer connection."""
+        peer = context.peer() if hasattr(context, 'peer') else 'unknown'
+        return str(peer)
+    
+    async def _cleanup_connection_resources(self, connection_id: str) -> None:
+        """Clean up all resources associated with a connection."""
+        async with self._cleanup_lock:
+            if connection_id in self.connection_objects:
+                self.logger.info(f"Cleaning up resources for connection: {connection_id}")
+                connection_data = self.connection_objects[connection_id]
+                
+                # Clean up all objects associated with this connection
+                for session_id, session_data in list(connection_data.get('sessions', {}).items()):
+                    await self._cleanup_session(session_id, session_data)
+                
+                # Remove connection tracking
+                del self.connection_objects[connection_id]
+                self.logger.info(f"Completed cleanup for connection: {connection_id}")
+    
+    async def _cleanup_session(self, session_id: str, session_data: Dict[str, Any]) -> None:
+        """Clean up a specific session and its resources."""
+        try:
+            obj = session_data.get('object')
+            if obj:
+                # Call cleanup on the object if it has the method
+                if hasattr(obj, 'cleanup') and callable(getattr(obj, 'cleanup')):
+                    self.logger.info(f"Calling cleanup on object {type(obj).__name__} for session {session_id}")
+                    if asyncio.iscoroutinefunction(obj.cleanup):
+                        await obj.cleanup()
+                    else:
+                        obj.cleanup()
+                
+                # For ML models, explicitly free VRAM
+                if hasattr(obj, 'llm_pipeline'):
+                    obj.llm_pipeline = None
+                if hasattr(obj, '_serve_engine'):
+                    obj._serve_engine = None
+                if hasattr(obj, 'model'):
+                    obj.model = None
+                
+                # Force garbage collection to free VRAM
+                import gc
+                gc.collect()
+                
+                # If torch is available, clear cache
+                try:
+                    import torch
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                        self.logger.info(f"Cleared CUDA cache after cleaning up session {session_id}")
+                except ImportError:
+                    pass
+            
+            # Clean up sandbox if exists
+            sandbox_path = session_data.get('sandbox_path')
+            if sandbox_path:
+                code_root = os.path.join(sandbox_path, "code")
+                if code_root in sys.path:
+                    sys.path.remove(code_root)
+                try:
+                    import shutil
+                    shutil.rmtree(sandbox_path)
+                    self.logger.info(f"Removed sandbox directory: {sandbox_path}")
+                except Exception as e:
+                    self.logger.error(f"Failed to cleanup sandbox {sandbox_path}: {e}")
+            
+            # Remove from object_sessions if present
+            if session_id in self.object_sessions:
+                del self.object_sessions[session_id]
+                
+        except Exception as e:
+            self.logger.error(f"Error during session cleanup for {session_id}: {e}", exc_info=True)
+    
+    async def _periodic_cleanup(self) -> None:
+        """Periodically clean up orphaned sessions and free resources."""
+        while True:
+            try:
+                await asyncio.sleep(300)  # Run every 5 minutes
+                
+                async with self._cleanup_lock:
+                    # Clean up orphaned sessions (sessions without connections)
+                    orphaned_sessions = []
+                    tracked_sessions = set()
+                    
+                    # Collect all tracked sessions
+                    for conn_data in self.connection_objects.values():
+                        tracked_sessions.update(conn_data.get('sessions', {}).keys())
+                    
+                    # Find orphaned sessions
+                    for session_id in list(self.object_sessions.keys()):
+                        if session_id not in tracked_sessions:
+                            orphaned_sessions.append(session_id)
+                    
+                    # Clean up orphaned sessions
+                    if orphaned_sessions:
+                        self.logger.info(f"Found {len(orphaned_sessions)} orphaned sessions, cleaning up...")
+                        for session_id in orphaned_sessions:
+                            session_data = self.object_sessions.get(session_id, {})
+                            await self._cleanup_session(session_id, session_data)
+                    
+                    # Force garbage collection and clear CUDA cache
+                    import gc
+                    gc.collect()
+                    
+                    try:
+                        import torch
+                        if torch.cuda.is_available():
+                            torch.cuda.empty_cache()
+                            self.logger.info("Periodic CUDA cache cleanup completed")
+                    except ImportError:
+                        pass
+                        
+            except Exception as e:
+                self.logger.error(f"Error during periodic cleanup: {e}", exc_info=True)
     
     async def ExecuteNode(
         self, 
@@ -193,6 +314,11 @@ class RemoteExecutionServicer(execution_pb2_grpc.RemoteExecutionServiceServicer)
         session_id = request.session_id
         obj = None
         sandbox_path = None
+        connection_id = self._get_peer_info(context)
+        
+        # Track this connection
+        if connection_id not in self.connection_objects:
+            self.connection_objects[connection_id] = {'sessions': {}}
         
         try:
             if session_id:
@@ -222,6 +348,12 @@ class RemoteExecutionServicer(execution_pb2_grpc.RemoteExecutionServiceServicer)
                 obj = cloudpickle.loads(base64.b64decode(encoded_obj))
                 
                 self.object_sessions[session_id] = {
+                    "object": obj,
+                    "sandbox_path": sandbox_path
+                }
+                
+                # Track this session under the connection
+                self.connection_objects[connection_id]['sessions'][session_id] = {
                     "object": obj,
                     "sandbox_path": sandbox_path
                 }
@@ -275,6 +407,11 @@ class RemoteExecutionServicer(execution_pb2_grpc.RemoteExecutionServiceServicer)
         obj = None
         sandbox_path = None
         session_id = None
+        connection_id = self._get_peer_info(context)
+        
+        # Track this connection
+        if connection_id not in self.connection_objects:
+            self.connection_objects[connection_id] = {'sessions': {}}
         
         try:
             # The first message from the client MUST be the initialization message.
@@ -403,12 +540,15 @@ class RemoteExecutionServicer(execution_pb2_grpc.RemoteExecutionServiceServicer)
             logger.error(f"Error during StreamObject execution with object type {type(obj).__name__ if obj else 'Unknown'}: {e}", exc_info=True)
             yield execution_pb2.StreamObjectResponse(error=f"Error during execution: {e}")
         finally:
-            # Only cleanup if the object was temporary (no session_id)
+            # Clean up all resources for this connection
+            await self._cleanup_connection_resources(connection_id)
+            
+            # Additional cleanup for temporary objects (no session_id)
             if not session_id and obj and hasattr(obj, 'cleanup'):
                 await obj.cleanup()
             
-            # Clean up sandbox if it was created
-            if sandbox_path:
+            # Clean up sandbox if it was created and not tracked in sessions
+            if sandbox_path and not session_id:
                 code_root = os.path.join(sandbox_path, "code")
                 if code_root in sys.path:
                     sys.path.remove(code_root)
@@ -418,7 +558,7 @@ class RemoteExecutionServicer(execution_pb2_grpc.RemoteExecutionServiceServicer)
                 except Exception as e:
                     logger.error(f"Failed to cleanup sandbox {sandbox_path}: {e}")
 
-            logger.info("StreamObject connection closed.")
+            logger.info(f"StreamObject connection closed for {connection_id}")
     
     async def StreamNode(
         self,
@@ -435,6 +575,12 @@ class RemoteExecutionServicer(execution_pb2_grpc.RemoteExecutionServiceServicer)
         node = None
         loop = asyncio.get_running_loop()
         executor = ThreadPoolExecutor()
+        connection_id = self._get_peer_info(context)
+        session_id = str(uuid.uuid4())
+        
+        # Track this connection
+        if connection_id not in self.connection_objects:
+            self.connection_objects[connection_id] = {'sessions': {}}
         
         try:
             # The first message is the initialization message
@@ -473,6 +619,12 @@ class RemoteExecutionServicer(execution_pb2_grpc.RemoteExecutionServiceServicer)
             NodeClass = getattr(nodes, node_type)
             node = NodeClass(**config)
             await node.initialize()
+            
+            # Track this node under the connection
+            self.connection_objects[connection_id]['sessions'][session_id] = {
+                "object": node,
+                "node_type": node_type
+            }
 
             # Get the correct serializer
             if serialization_format == 'pickle':
@@ -523,9 +675,9 @@ class RemoteExecutionServicer(execution_pb2_grpc.RemoteExecutionServiceServicer)
             yield execution_pb2.StreamData(error_message=f"Error on server: {e}")
         
         finally:
-            if node and hasattr(node, 'cleanup'):
-                await node.cleanup()
-            self.logger.info("StreamNode connection closed.")
+            # Clean up all resources for this connection
+            await self._cleanup_connection_resources(connection_id)
+            self.logger.info(f"StreamNode connection closed for {connection_id}")
     
     async def GetStatus(
         self,

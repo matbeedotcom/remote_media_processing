@@ -24,6 +24,9 @@ services:
       - TORCH_HOME=/home/remotemedia/.cache/torch
       - TORCH_CACHE=/home/remotemedia/.cache/torch
       - REMOTEMEDIA_CACHE_DIR=/app/cache/models
+      # Hugging Face token for model downloads
+      - HF_TOKEN=${HF_TOKEN}
+      - HUGGINGFACEHUB_API_TOKEN=${HF_TOKEN}
     volumes:
       # Mount logs for debugging
       - ./remote_service/logs:/app/logs
@@ -33,13 +36,13 @@ services:
       # - ./remote_service/src:/app/src:ro
       # Model cache directories - choose one option:
       # Option 1: Docker volumes (recommended for production)
-      # - ml_model_cache:/app/cache/models
-      # - huggingface_cache:/home/remotemedia/.cache/huggingface
-      # - torch_cache:/home/remotemedia/.cache/torch
+      - ml_model_cache:/app/cache/models
+      - huggingface_cache:/home/remotemedia/.cache/huggingface
+      - torch_cache:/home/remotemedia/.cache/torch
       # Option 2: Host directories (uncomment to use local directories)
-      - ./cache/models:/app/cache/models
-      - ./cache/huggingface:/home/remotemedia/.cache/huggingface
-      - ./cache/torch:/home/remotemedia/.cache/torch
+      # - ./cache/models:/app/cache/models
+      # - ./cache/huggingface:/home/remotemedia/.cache/huggingface
+      # - ./cache/torch:/home/remotemedia/.cache/torch
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "/app/src/health_check.py"]
@@ -58,11 +61,15 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '2.0'
-          memory: 2G
+          cpus: '4.0'
+          memory: 8G
         reservations:
-          cpus: '0.5'
-          memory: 512M
+          cpus: '1.0'
+          memory: 4G
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
 
   # Prometheus for metrics collection (optional)
   prometheus:
