@@ -109,8 +109,10 @@ async with RemoteProxyClient(config) as client:
     result = await remote_calc.add(5, 3)
     print(f"5 + 3 = {result}")  # Executed on remote server!
     
+    # Keyword arguments work transparently!
+    result = await remote_calc.calculate(operation="multiply", a=10, b=4)
+    
     # The remote object maintains state
-    await remote_calc.multiply(10, 4)
     history = await remote_calc.history()  # State persists remotely
 ```
 
@@ -132,6 +134,7 @@ async with RemoteProxyClient(config) as client:
 - ✅ Properties and attributes (accessed with `await`)
 - ✅ Static methods
 - ✅ Most special methods (`__call__`, `__getitem__`, etc.)
+- ✅ **Keyword arguments** (NEW): Full support for kwargs in all method types
 
 **Generator Streaming Support (NEW!):** 
 - ✅ **True streaming**: Generators now return proxy objects that fetch items as needed

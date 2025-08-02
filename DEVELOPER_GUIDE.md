@@ -215,8 +215,10 @@ async with RemoteProxyClient(config) as client:
     result = await remote_calc.add(5, 3)
     print(f"Result: {result}")  # Executed on remote server!
     
+    # Keyword arguments work transparently!
+    result = await remote_calc.calculate(operation="multiply", a=10, b=4)
+    
     # Object state is maintained remotely
-    await remote_calc.multiply(10, 4)
     history = await remote_calc.history()
 ```
 
@@ -242,7 +244,8 @@ The `RemoteProxyClient` uses Python's `__getattr__` magic method to intercept al
 - **Generator Streaming (NEW!)**: Generators return proxy objects that stream data as needed
 - **Async Generators**: Both sync and async generators are transparently streamed
 - **Properties**: Non-callable attributes are fetched as values from the remote object
-- **Mixed Args**: Both positional and keyword arguments are properly serialized
+- **Keyword Arguments (NEW!)**: Full support for kwargs in all method types
+- **Mixed Args**: Both positional and keyword arguments are properly serialized and passed
 - **Batched Fetching**: Generator items are fetched in configurable batches (default: 10)
 - **Early Termination**: Breaking from iteration properly closes the generator on the server
 - **Error Propagation**: Exceptions in generators are propagated to the client
@@ -347,9 +350,14 @@ class DataProcessor:
     def process(self, data):
         return data.upper()
     
+    # Methods with keyword arguments - work perfectly
+    def process_with_options(self, data, capitalize=True, reverse=False):
+        result = data.upper() if capitalize else data.lower()
+        return result[::-1] if reverse else result
+    
     # Async methods - work perfectly
-    async def async_process(self, data):
-        await asyncio.sleep(0.1)
+    async def async_process(self, data, delay=0.1):
+        await asyncio.sleep(delay)
         return data.lower()
     
     # Generators - automatically converted to lists
@@ -379,7 +387,11 @@ async with RemoteProxyClient(config) as client:
     
     # All these work transparently
     result = await remote.process("hello")           # Regular method
-    async_result = await remote.async_process("WORLD")  # Async method
+    
+    # Keyword arguments work exactly as expected!
+    options_result = await remote.process_with_options("Test", capitalize=False, reverse=True)
+    async_result = await remote.async_process("WORLD", delay=0.5)  # Async with kwargs
+    
     numbers = await remote.generate_numbers(5)      # Generator → list
     async_nums = await remote.async_generate(3)     # Async gen → list
     count = await remote.count                      # Property access

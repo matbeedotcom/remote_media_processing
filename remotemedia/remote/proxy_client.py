@@ -45,15 +45,14 @@ class RemoteProxy:
             @wraps(attr)
             async def remote_method(*args, **kwargs):
                 """Execute the method remotely."""
-                # Combine args and kwargs for remote execution
+                # Keep args and kwargs separate for proper remote execution
                 method_args = list(args)
-                if kwargs:
-                    method_args.append(kwargs)
                 
                 result = await self._client._execute_remote_method(
                     session_id=self._session_id,
                     method_name=name,
-                    method_args=method_args
+                    method_args=method_args,
+                    method_kwargs=kwargs if kwargs else None
                 )
                 
                 # Check if the result is a generator marker
@@ -167,6 +166,7 @@ class RemoteProxyClient:
         session_id: str,
         method_name: str,
         method_args: List[Any],
+        method_kwargs: Optional[Dict[str, Any]] = None,
         serialization_format: str = "pickle"
     ) -> Any:
         """
@@ -176,6 +176,7 @@ class RemoteProxyClient:
             session_id: The session ID for the remote object
             method_name: Name of the method to execute
             method_args: Arguments for the method
+            method_kwargs: Keyword arguments for the method
             serialization_format: Serialization format to use
             
         Returns:
@@ -185,6 +186,7 @@ class RemoteProxyClient:
             obj=None,  # We're using session_id instead
             method_name=method_name,
             method_args=method_args,
+            method_kwargs=method_kwargs,
             serialization_format=serialization_format,
             session_id=session_id
         )

@@ -299,11 +299,23 @@ class RemoteExecutionClient:
         obj: Any,
         method_name: str,
         method_args: List[Any],
+        method_kwargs: Optional[Dict[str, Any]] = None,
         serialization_format: str = "pickle",
         session_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Execute a method on a serialized object remotely using session management.
+        
+        Args:
+            obj: The object instance (required if session_id is not provided)
+            method_name: Name of the method to execute
+            method_args: Positional arguments for the method
+            method_kwargs: Keyword arguments for the method
+            serialization_format: Format for serialization
+            session_id: Session ID for existing objects
+            
+        Returns:
+            Dict containing the result and session_id
         """
         if not self.stub:
             raise RemoteExecutionError("Not connected to remote service")
@@ -319,6 +331,11 @@ class RemoteExecutionClient:
             "method_name": method_name,
             "method_args_data": serialized_args
         }
+        
+        # Add keyword arguments if provided
+        if method_kwargs:
+            serialized_kwargs = serializer.serialize(method_kwargs)
+            request_args["method_kwargs_data"] = serialized_kwargs
 
         if session_id:
             request_args["session_id"] = session_id

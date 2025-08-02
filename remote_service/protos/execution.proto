@@ -128,6 +128,7 @@ message ExecuteObjectMethodRequest {
     string serialization_format = 4;
     string method_name = 5;
     bytes method_args_data = 6; // Serialized arguments
+    bytes method_kwargs_data = 7; // Serialized keyword arguments
 }
 
 // Response from executing a method on a serialized object
@@ -202,6 +203,7 @@ message InitGeneratorRequest {
   string method_name = 2;          // Generator method name
   bytes method_args_data = 3;      // Serialized arguments
   string serialization_format = 4;
+  bytes method_kwargs_data = 5;    // Serialized keyword arguments
 }
 
 message InitGeneratorResponse {

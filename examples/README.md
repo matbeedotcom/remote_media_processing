@@ -255,6 +255,9 @@ class Example:
     async def async_method(self):
         return "async result"
     
+    def method_with_kwargs(self, value, multiplier=2, add=0):
+        return value * multiplier + add
+    
     def generator_method(self):
         for i in range(3):
             yield i
@@ -267,6 +270,11 @@ class Example:
 remote = await client.create_proxy(Example())
 sync_result = await remote.sync_method()        # Works!
 async_result = await remote.async_method()      # Works!
+
+# Keyword arguments work transparently! (NEW)
+result = await remote.method_with_kwargs(10, multiplier=3, add=5)  # = 35
+result2 = await remote.method_with_kwargs(10, add=15)  # Uses default multiplier=2, = 35
+
 gen_result = await remote.generator_method()    # Returns generator proxy!
 # Stream the generator results:
 async for item in gen_result:

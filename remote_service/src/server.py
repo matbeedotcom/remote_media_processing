@@ -401,6 +401,11 @@ class RemoteExecutionServicer(execution_pb2_grpc.RemoteExecutionServiceServicer)
             # Deserialize arguments
             serializer = PickleSerializer() if request.serialization_format == 'pickle' else JSONSerializer()
             method_args = serializer.deserialize(request.method_args_data)
+            
+            # Deserialize keyword arguments if provided
+            method_kwargs = {}
+            if request.method_kwargs_data:
+                method_kwargs = serializer.deserialize(request.method_kwargs_data)
 
             # Handle special proxy initialization
             if request.method_name == "__init__":
@@ -414,9 +419,9 @@ class RemoteExecutionServicer(execution_pb2_grpc.RemoteExecutionServiceServicer)
                 if callable(attr):
                     # It's a method - call it
                     if asyncio.iscoroutinefunction(attr):
-                        result = await attr(*method_args)
+                        result = await attr(*method_args, **method_kwargs)
                     else:
-                        result = attr(*method_args)
+                        result = attr(*method_args, **method_kwargs)
                     
                     # Handle generators by creating a session instead of materializing
                     if inspect.isgenerator(result) or inspect.isasyncgen(result):
@@ -866,12 +871,17 @@ class RemoteExecutionServicer(execution_pb2_grpc.RemoteExecutionServiceServicer)
             serializer = PickleSerializer() if request.serialization_format == 'pickle' else JSONSerializer()
             method_args = serializer.deserialize(request.method_args_data)
             
+            # Deserialize keyword arguments if provided
+            method_kwargs = {}
+            if request.method_kwargs_data:
+                method_kwargs = serializer.deserialize(request.method_kwargs_data)
+            
             # Call method to get generator
             attr = getattr(obj, request.method_name)
             if asyncio.iscoroutinefunction(attr):
-                result = await attr(*method_args)
+                result = await attr(*method_args, **method_kwargs)
             else:
-                result = attr(*method_args)
+                result = attr(*method_args, **method_kwargs)
             
             # Verify it's a generator
             if not (inspect.isgenerator(result) or inspect.isasyncgen(result)):
