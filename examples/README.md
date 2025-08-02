@@ -110,4 +110,78 @@ This test provides a foundation for:
 3. Preparing for Phase 3 custom code execution
 4. Debugging remote execution issues
 
+## Remote Proxy Client Examples
+
+The RemoteProxyClient provides transparent remote execution for ANY Python object. Here are the example scripts:
+
+### simplest_proxy.py
+The simplest demonstration of RemoteProxyClient - shows how ANY object can be made remote with just one line:
+
+```bash
+python examples/simplest_proxy.py
+```
+
+Features demonstrated:
+- One-line remote object creation: `remote_obj = await client.create_proxy(obj)`
+- Works with calculators, todo lists, string processors
+- State persistence across method calls
+
+### simple_remote_proxy.py
+More comprehensive examples showing RemoteProxyClient with various object types:
+
+```bash
+python examples/simple_remote_proxy.py
+```
+
+Features demonstrated:
+- Simple counters and string processors
+- Math operations with numpy arrays
+- Stateful objects (todo lists)
+- Built-in Python objects
+
+### remote_proxy_example.py
+Advanced examples including decorator patterns and dynamic clients:
+
+```bash
+python examples/remote_proxy_example.py
+```
+
+Features demonstrated:
+- Manual proxy creation
+- Chained method calls
+- Alternative syntax approaches
+
+### minimal_proxy.py / ultra_simple_proxy.py
+Minimal examples focused on clarity:
+
+```bash
+python examples/minimal_proxy.py
+python examples/ultra_simple_proxy.py
+```
+
+### Key Concepts
+
+1. **Zero Setup**: No special base classes or interfaces required
+2. **Transparent Usage**: Methods are called exactly like local objects (just add `await`)
+3. **State Persistence**: Objects maintain their state on the remote server
+4. **Session Management**: Automatic session handling with unique IDs
+
+### Example Usage
+
+```python
+from remotemedia.remote import RemoteProxyClient
+from remotemedia.core.node import RemoteExecutorConfig
+
+config = RemoteExecutorConfig(host="localhost", port=50052)
+
+async with RemoteProxyClient(config) as client:
+    # ANY object becomes remote with one line!
+    calculator = Calculator()
+    remote_calc = await client.create_proxy(calculator)
+    
+    # Use it normally (with await)
+    result = await remote_calc.add(5, 3)
+    print(f"Result: {result}")  # Executed remotely!
+```
+
 For more complex examples and integration tests, see the `tests/` directory. 

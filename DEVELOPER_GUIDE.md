@@ -193,7 +193,93 @@ pipeline.run()
 
 This pattern allows you to experiment with different models and tasks on the fly, without ever needing to modify the server's code.
 
-## 5. Server Setup
+## 5. RemoteProxyClient: The Simplest Remote Execution
+
+While the pipeline approach is powerful for streaming data processing, sometimes you just want to execute arbitrary Python objects remotely. The `RemoteProxyClient` provides transparent remote execution for ANY Python object with minimal setup.
+
+### Basic Usage
+
+```python
+from remotemedia.remote import RemoteProxyClient
+from remotemedia.core.node import RemoteExecutorConfig
+
+# Configure the connection
+config = RemoteExecutorConfig(host="localhost", port=50052)
+
+async with RemoteProxyClient(config) as client:
+    # ANY object can be made remote with one line!
+    calculator = Calculator()
+    remote_calc = await client.create_proxy(calculator)
+    
+    # Use it exactly like a local object (just add await)
+    result = await remote_calc.add(5, 3)
+    print(f"Result: {result}")  # Executed on remote server!
+    
+    # Object state is maintained remotely
+    await remote_calc.multiply(10, 4)
+    history = await remote_calc.history()
+```
+
+### Key Benefits
+
+1. **Zero Configuration**: No special base classes or interfaces required
+2. **Transparent Usage**: Call methods exactly as you would locally
+3. **State Persistence**: Objects maintain their state on the remote server
+4. **Session Management**: Automatic session handling across method calls
+
+### How It Works
+
+The `RemoteProxyClient` uses Python's `__getattr__` magic method to intercept all method calls on the proxy object. When you call a method:
+
+1. The proxy captures the method name and arguments
+2. Serializes them using CloudPickle
+3. Sends them to the remote server via gRPC
+4. The server executes the method on the actual object
+5. Returns the result back to the client
+6. The proxy deserializes and returns the result
+
+### Best Practices
+
+- **Serializable Objects**: Ensure your objects and their dependencies are serializable with CloudPickle
+- **Avoid `__main__` Classes**: Classes defined in `__main__` can't be pickled. Define classes in importable modules instead
+- **Avoid Local Resources**: Objects shouldn't depend on local files, sockets, or hardware
+- **Async Methods**: All proxy methods return coroutines, so use `await`
+- **Error Handling**: Remote exceptions are propagated back to the client
+
+### Common Pitfall: Classes in `__main__`
+
+CloudPickle cannot serialize classes defined in the `__main__` module. Always define your classes in a separate module:
+
+```python
+# BAD - This won't work
+if __name__ == "__main__":
+    class MyClass:
+        def method(self):
+            return "result"
+    
+    obj = MyClass()
+    remote_obj = await client.create_proxy(obj)  # Will fail!
+
+# GOOD - Define in a module
+# my_module.py
+class MyClass:
+    def method(self):
+        return "result"
+
+# main.py
+from my_module import MyClass
+obj = MyClass()
+remote_obj = await client.create_proxy(obj)  # Works!
+```
+
+### Use Cases
+
+- **Heavy Computation**: Offload CPU/GPU intensive operations
+- **Stateful Services**: Maintain complex state on powerful servers
+- **ML Model Inference**: Run models without local installation
+- **Data Processing**: Process large datasets remotely
+
+## 6. Server Setup
 
 To use remote execution, you need the gRPC server running.
 

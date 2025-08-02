@@ -157,9 +157,10 @@ class WebRTCStreamSource(Node):
     to the pipeline's internal format.
     """
     
-    def __init__(self, track: MediaStreamTrack, **kwargs):
+    def __init__(self, track: MediaStreamTrack, connection_id: str = None, **kwargs):
         super().__init__(**kwargs)
         self.track = track
+        self.connection_id = connection_id
         self.is_streaming = True
         self._frame_queue = asyncio.Queue(maxsize=500)  # Increased buffer for ML processing delays
         self._processing_task: Optional[asyncio.Task] = None
@@ -282,7 +283,15 @@ class WebRTCStreamSource(Node):
             self._last_audio_rms = audio_rms
             
             logger.debug(f"WebRTCStreamSource: Converted audio frame: shape={audio_array.shape}, dtype={audio_array.dtype}, sample_rate={frame.sample_rate}")
-            return (audio_array, frame.sample_rate)
+            
+            # Include connection_id as session_id in metadata for conversation continuity
+            metadata = {
+                'session_id': self.connection_id,
+                'timestamp': frame.pts,
+                'source': 'webrtc'
+            }
+            
+            return (audio_array, frame.sample_rate, metadata)
             
         except Exception as e:
             logger.error(f"Error converting audio frame: {e}")
@@ -300,7 +309,9 @@ class WebRTCStreamSource(Node):
                 'height': frame.height,
                 'format': 'rgb24',
                 'pts': frame.pts,
-                'time_base': frame.time_base
+                'time_base': frame.time_base,
+                'session_id': self.connection_id,
+                'source': 'webrtc'
             }
             
         except Exception as e:
@@ -492,6 +503,7 @@ class WebRTCPipelineProcessor:
             # Create a stream source for this track
             source = WebRTCStreamSource(
                 track=track,
+                connection_id=self.connection_id,
                 name=f"WebRTCSource_{track_id}"
             )
             self.stream_sources[track_id] = source

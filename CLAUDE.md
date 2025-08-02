@@ -15,6 +15,7 @@ RemoteMedia Processing SDK is a Python SDK for building distributed audio/video/
 
 ### Remote Execution
 - **RemoteExecutionClient** (`remotemedia/remote/client.py`): gRPC client for remote node execution
+- **RemoteProxyClient** (`remotemedia/remote/proxy_client.py`): Transparent proxy that makes ANY Python object remotely executable
 - **Code Packaging** (`remotemedia/packaging/`): AST-based dependency analysis and CloudPickle serialization for user-defined code
 - **Remote Service** (`remote_service/`): Docker-based gRPC server for sandboxed code execution
 
@@ -152,6 +153,30 @@ Phase 3 (Advanced Offloading for User-Defined Python Code) is COMPLETE:
 - ✅ Full test coverage (7/7 scenarios passing)
 
 ## Common Development Tasks
+
+### Using RemoteProxyClient for Transparent Remote Execution
+The RemoteProxyClient provides the simplest way to make any Python object execute remotely:
+
+```python
+from remotemedia.remote import RemoteProxyClient
+from remotemedia.core.node import RemoteExecutorConfig
+
+config = RemoteExecutorConfig(host="localhost", port=50052)
+async with RemoteProxyClient(config) as client:
+    # Make ANY object remote with one line
+    obj = MyComplexObject()
+    remote_obj = await client.create_proxy(obj)
+    
+    # Use exactly like the local object (just add await)
+    result = await remote_obj.process_data(input_data)
+```
+
+Key points:
+- Works with ANY serializable Python object
+- No special base class or interface required
+- Maintains object state on remote server between calls
+- Session management is automatic
+- All method calls are transparently forwarded to remote execution
 
 ### Adding a New Node Type
 1. Create new class inheriting from `Node` in `remotemedia/nodes/`

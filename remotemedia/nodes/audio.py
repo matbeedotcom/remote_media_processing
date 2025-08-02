@@ -43,14 +43,17 @@ class AudioTransform(Node):
         Returns:
             A tuple `(processed_audio_data, output_sample_rate)`.
         """
-        if not isinstance(data, tuple) or len(data) != 2:
+        # Use base class helper to extract metadata
+        data_without_metadata, metadata = self.split_data_metadata(data)
+        
+        if not isinstance(data_without_metadata, tuple) or len(data_without_metadata) < 2:
             logger.warning(
                 f"AudioTransform '{self.name}': received data in "
                 "unexpected format. Expected (audio_data, sample_rate)."
             )
             return data
 
-        audio_data, input_sample_rate = data
+        audio_data, input_sample_rate = data_without_metadata[:2]
 
         if not isinstance(audio_data, np.ndarray):
             logger.warning(f"AudioTransform '{self.name}': audio data is not a numpy array.")
@@ -91,7 +94,10 @@ class AudioTransform(Node):
             f"AudioTransform '{self.name}': processed audio to "
             f"{self.output_sample_rate}Hz and {self.output_channels} channels."
         )
-        return (audio_data, self.output_sample_rate)
+        
+        # Use base class helper to preserve metadata
+        result = (audio_data, self.output_sample_rate)
+        return self.merge_data_metadata(result, metadata)
 
 
 class AudioBuffer(Node):
@@ -275,11 +281,14 @@ class VoiceActivityDetector(Node):
             In filter mode: (audio_data, sample_rate) for speech segments only
         """
         async for data in data_stream:
-            if not isinstance(data, tuple) or len(data) != 2:
+            # Extract metadata if present
+            data_without_metadata, input_metadata = self.split_data_metadata(data)
+            
+            if not isinstance(data_without_metadata, tuple) or len(data_without_metadata) < 2:
                 logger.warning(f"VAD '{self.name}': Invalid input format")
                 continue
                 
-            audio_data, sample_rate = data
+            audio_data, sample_rate = data_without_metadata[:2]
             
             if not isinstance(audio_data, np.ndarray):
                 logger.warning(f"VAD '{self.name}': Audio data is not numpy array")
@@ -301,8 +310,8 @@ class VoiceActivityDetector(Node):
             # Analyze frames
             is_speech, vad_info = self._analyze_audio(mono_audio, frame_samples)
             
-            # Create metadata
-            metadata = {
+            # Create VAD metadata
+            vad_metadata = {
                 "is_speech": is_speech,
                 "speech_ratio": vad_info["speech_ratio"],
                 "avg_energy": vad_info["avg_energy"],
@@ -314,15 +323,27 @@ class VoiceActivityDetector(Node):
                 # Only output if speech detected
                 if is_speech:
                     logger.debug(f"VAD '{self.name}': Speech detected (ratio: {vad_info['speech_ratio']:.2f})")
-                    yield (audio_data, sample_rate)
+                    # Preserve input metadata
+                    result = (audio_data, sample_rate)
+                    yield self.merge_data_metadata(result, input_metadata)
                 else:
                     logger.debug(f"VAD '{self.name}': No speech detected, filtering out")
             else:
                 # Passthrough mode - always output with metadata
                 if self.include_metadata:
-                    yield ((audio_data, sample_rate), metadata)
+                    # Preserve input metadata while adding VAD info
+                    result = (audio_data, sample_rate)
+                    if input_metadata:
+                        # Merge VAD metadata with input metadata
+                        merged_metadata = input_metadata.copy()
+                        merged_metadata.update(vad_metadata)
+                        yield ((audio_data, sample_rate), merged_metadata)
+                    else:
+                        yield ((audio_data, sample_rate), vad_metadata)
                 else:
-                    yield (audio_data, sample_rate)
+                    # No VAD metadata requested, just preserve input metadata
+                    result = (audio_data, sample_rate)
+                    yield self.merge_data_metadata(result, input_metadata)
                     
     def _analyze_audio(self, audio: np.ndarray, frame_samples: int) -> tuple[bool, dict]:
         """

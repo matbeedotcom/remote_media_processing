@@ -19,7 +19,13 @@ The RemoteMedia Processing SDK enables developers to create complex, real-time p
 
 ## Development Status
 
-**Current Phase**: Phase 3 - Advanced Offloading for User-Defined Python Code (COMPLETE) ✅
+**Current Phase**: Phase 4 - WebRTC Real-time Audio Processing (COMPLETE) ✅
+
+**Phase 4 Achievements:**
+- ✅ **WebRTC Server Integration**: Real-time audio/video streaming with aiortc
+- ✅ **Voice Activity Detection (VAD)**: Speech segmentation with buffering
+- ✅ **Speech-to-Speech Pipeline**: Ultravox STT + Kokoro TTS integration
+- ✅ **Remote Proxy Client**: Transparent remote execution for ANY Python object
 
 **Phase 3 Achievements:**
 - ✅ **Remote Python Code Execution**: Full support for executing user-defined Python code remotely
@@ -30,6 +36,9 @@ The RemoteMedia Processing SDK enables developers to create complex, real-time p
 - ✅ **Comprehensive Testing**: 7/7 test scenarios passing (4 CloudPickle + 3 dependency packaging)
 
 **What Works Now:**
+- **NEW**: RemoteProxyClient - Make ANY Python object remote with one line of code
+- WebRTC real-time audio processing with proper frame timing
+- Voice-triggered speech-to-speech conversation system
 - Users can define Python classes locally with custom dependencies
 - AST analysis automatically detects and packages local Python file imports
 - CloudPickle enables serialization of complex user-defined objects
@@ -81,6 +90,39 @@ pipeline = Pipeline(
 pipeline.run()
 ```
 
+### Remote Proxy Client
+The RemoteProxyClient provides the simplest way to execute ANY Python object remotely:
+
+```python
+from remotemedia.remote import RemoteProxyClient
+from remotemedia.core.node import RemoteExecutorConfig
+
+# Configure connection
+config = RemoteExecutorConfig(host="localhost", port=50052)
+
+async with RemoteProxyClient(config) as client:
+    # Make ANY object remote with just ONE line!
+    calculator = Calculator()
+    remote_calc = await client.create_proxy(calculator)
+    
+    # Use it exactly like a local object (just add await)
+    result = await remote_calc.add(5, 3)
+    print(f"5 + 3 = {result}")  # Executed on remote server!
+    
+    # The remote object maintains state
+    await remote_calc.multiply(10, 4)
+    history = await remote_calc.history()  # State persists remotely
+```
+
+**Key Features:**
+- **One-line remote conversion**: `remote_obj = await client.create_proxy(obj)`
+- **Works with ANY Python object**: No special base class required
+- **Transparent usage**: Call methods exactly as you would locally
+- **State persistence**: Objects maintain state on the remote server
+- **Session management**: Automatic session handling with unique IDs
+
+See `examples/simplest_proxy.py` for more examples.
+
 ## Installation
 
 ```bash
@@ -114,7 +156,8 @@ remotemedia/                 # Core SDK package
 ├── webrtc/                 # WebRTC communication
 │   └── manager.py          # WebRTC connection manager
 ├── remote/                 # Remote execution client
-│   └── client.py           # gRPC remote execution client
+│   ├── client.py           # gRPC remote execution client
+│   └── proxy_client.py     # Transparent proxy for ANY Python object
 ├── serialization/          # Data serialization utilities
 │   └── base.py             # JSON and Pickle serializers
 ├── utils/                  # Common utilities
