@@ -3,7 +3,7 @@ Base Node class and remote execution configuration.
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Optional, Union, TypeVar, Generic
+from typing import Any, Dict, Optional, Union, TypeVar, Generic, List
 from dataclasses import dataclass, field
 import logging
 import asyncio
@@ -187,6 +187,7 @@ class RemoteExecutorConfig:
     timeout: float = 30.0
     max_retries: int = 3
     ssl_enabled: bool = True
+    pip_packages: Optional[List[str]] = None
     
     def __post_init__(self):
         """Validate configuration after initialization."""

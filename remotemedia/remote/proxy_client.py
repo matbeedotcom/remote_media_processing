@@ -153,7 +153,8 @@ class RemoteProxyClient:
             obj=obj,
             method_name="__init__",  # Use __init__ as a safe method that exists
             method_args=[],
-            serialization_format=serialization_format
+            serialization_format=serialization_format,
+            dependencies=self.config.pip_packages
         )
         
         session_id = result["session_id"]

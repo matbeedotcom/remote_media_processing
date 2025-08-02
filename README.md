@@ -16,6 +16,7 @@ The RemoteMedia Processing SDK enables developers to create complex, real-time p
 - **Secure Remote Execution**: Sandboxed execution environment for user-defined code
 - **CloudPickle Integration**: Serialize and execute user-defined Python classes remotely
 - **AST-Based Dependency Analysis**: Automatic detection and packaging of local Python dependencies
+- **Pip Package Dependencies**: Automatically install required packages on remote servers
 
 ## Development Status
 
@@ -116,6 +117,24 @@ async with RemoteProxyClient(config) as client:
     history = await remote_calc.history()  # State persists remotely
 ```
 
+**With Pip Package Dependencies (NEW!):**
+```python
+# Specify pip packages that your remote code needs
+config = RemoteExecutorConfig(
+    host="localhost", 
+    port=50052,
+    pip_packages=["numpy", "pandas", "scipy", "requests"]
+)
+
+async with RemoteProxyClient(config) as client:
+    # Your object can now use these packages on the remote server!
+    data_processor = DataProcessor()
+    remote_processor = await client.create_proxy(data_processor)
+    
+    # The remote server automatically installs packages in a virtual environment
+    result = await remote_processor.analyze_with_pandas(data)
+```
+
 **Key Features:**
 - **One-line remote conversion**: `remote_obj = await client.create_proxy(obj)`
 - **Works with ANY Python object**: No special base class required
@@ -125,6 +144,7 @@ async with RemoteProxyClient(config) as client:
 - **Generator support**: Generators automatically materialized to lists
 - **Property support**: Access properties with `await`
 - **Async method support**: Both sync and async methods work seamlessly
+- **Pip package dependencies**: Automatically install required packages on remote server
 
 **Supported Method Types:**
 - ✅ Synchronous methods (automatically wrapped in async)
@@ -156,6 +176,58 @@ async for chunk in await remote_obj.read_large_file("data.bin"):
 See `examples/test_streaming_generators.py` for comprehensive examples.
 
 See `examples/simplest_proxy.py` and `examples/test_transparent_generators.py` for more examples.
+
+### Pip Package Dependencies (NEW!)
+
+The SDK now supports automatic installation of pip packages on the remote server:
+
+```python
+from remotemedia.core.node import RemoteExecutorConfig
+from remotemedia.remote import RemoteProxyClient
+
+# Specify packages your remote code needs
+config = RemoteExecutorConfig(
+    host="localhost",
+    port=50052,
+    pip_packages=["beautifulsoup4", "requests", "pillow", "matplotlib"]
+)
+
+class WebScraper:
+    def scrape_images(self, url):
+        import requests
+        from bs4 import BeautifulSoup
+        from PIL import Image
+        import io
+        
+        # These imports work because packages are installed remotely!
+        response = requests.get(url)
+        soup = BeautifulSoup(response.content, 'html.parser')
+        # ... process images with PIL ...
+
+async with RemoteProxyClient(config) as client:
+    scraper = WebScraper()
+    remote_scraper = await client.create_proxy(scraper)
+    
+    # Packages are installed automatically in a virtual environment
+    images = await remote_scraper.scrape_images("https://example.com")
+```
+
+**Features:**
+- **Automatic installation**: Packages are installed when creating the proxy
+- **Virtual environment isolation**: Each session gets its own virtual environment
+- **Dependency resolution**: Package dependencies are automatically resolved
+- **Error handling**: Clear error messages if packages fail to install
+- **No server restart needed**: Add new packages dynamically per session
+
+**Supported packages**: Any pip-installable package including:
+- Scientific computing: `numpy`, `scipy`, `pandas`, `scikit-learn`
+- Web scraping: `beautifulsoup4`, `requests`, `httpx`, `selenium`
+- Image processing: `pillow`, `opencv-python`, `imageio`
+- Machine learning: `torch`, `tensorflow`, `transformers`
+- Data visualization: `matplotlib`, `seaborn`, `plotly`
+- And many more!
+
+See `examples/demo_with_pip_packages.py` for comprehensive examples.
 
 ## Installation
 

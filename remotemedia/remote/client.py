@@ -241,6 +241,7 @@ class RemoteExecutionClient:
         serialization_format: str = "pickle",
         obj: Optional[Any] = None,
         session_id: Optional[str] = None,
+        dependencies: Optional[List[str]] = None,
     ) -> AsyncGenerator[Any, None]:
         """
         Execute a serialized object with a streaming input/output.
@@ -269,6 +270,10 @@ class RemoteExecutionClient:
                 init_kwargs["code_package"] = packager.package_object(obj)
             else:
                 raise ValueError("Either obj or session_id must be provided.")
+            
+            # Add dependencies if provided
+            if dependencies:
+                init_kwargs["dependencies"] = dependencies
 
             init_message = execution_pb2.StreamObjectInit(**init_kwargs)
             init_request = execution_pb2.StreamObjectRequest(init=init_message)
@@ -301,7 +306,8 @@ class RemoteExecutionClient:
         method_args: List[Any],
         method_kwargs: Optional[Dict[str, Any]] = None,
         serialization_format: str = "pickle",
-        session_id: Optional[str] = None
+        session_id: Optional[str] = None,
+        dependencies: Optional[List[str]] = None
     ) -> Dict[str, Any]:
         """
         Execute a method on a serialized object remotely using session management.
@@ -343,6 +349,10 @@ class RemoteExecutionClient:
             packager = CodePackager()
             code_package = packager.package_object(obj)
             request_args["code_package"] = code_package
+        
+        # Add dependencies if provided
+        if dependencies:
+            request_args["dependencies"] = dependencies
 
         request = execution_pb2.ExecuteObjectMethodRequest(**request_args)
 

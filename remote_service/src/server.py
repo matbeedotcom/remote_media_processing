@@ -14,7 +14,7 @@ import signal
 import sys
 import time
 from concurrent import futures
-from typing import Dict, Any, AsyncIterable, AsyncGenerator
+from typing import Dict, Any, AsyncIterable, AsyncGenerator, List, Optional
 import inspect
 from concurrent.futures import ThreadPoolExecutor
 import uuid
@@ -32,6 +32,7 @@ import zipfile
 import io
 import tempfile
 import base64
+import subprocess
 
 # Import service components
 from config import ServiceConfig
@@ -158,6 +159,105 @@ class RemoteExecutionServicer(execution_pb2_grpc.RemoteExecutionServiceServicer)
                 
         except Exception as e:
             self.logger.error(f"Error during session cleanup for {session_id}: {e}", exc_info=True)
+    
+    async def _install_pip_packages(self, packages: List[str], sandbox_path: str) -> List[str]:
+        """
+        Install pip packages in the sandbox environment.
+        
+        Args:
+            packages: List of package names to install
+            sandbox_path: Path to the sandbox directory
+            
+        Returns:
+            List of successfully installed packages
+        """
+        if not packages:
+            return []
+        
+        installed = []
+        venv_path = os.path.join(sandbox_path, "venv")
+        
+        try:
+            # Create virtual environment
+            self.logger.info(f"Creating virtual environment in {venv_path}")
+            proc = await asyncio.create_subprocess_exec(
+                sys.executable, "-m", "venv", venv_path,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await proc.communicate()
+            
+            if proc.returncode != 0:
+                self.logger.error(f"Failed to create venv: {stderr.decode()}")
+                return []
+            
+            # Wait a moment for venv creation to complete
+            await asyncio.sleep(0.1)
+            
+            # Get pip path in venv
+            pip_path = os.path.join(venv_path, "bin", "pip") if os.name != "nt" else os.path.join(venv_path, "Scripts", "pip.exe")
+            
+            # Verify pip exists
+            if not os.path.exists(pip_path):
+                self.logger.error(f"Pip not found at {pip_path}")
+                # Try python -m pip instead
+                python_path = os.path.join(venv_path, "bin", "python") if os.name != "nt" else os.path.join(venv_path, "Scripts", "python.exe")
+                
+                # Install packages using python -m pip
+                for package in packages:
+                    try:
+                        self.logger.info(f"Installing package: {package}")
+                        proc = await asyncio.create_subprocess_exec(
+                            python_path, "-m", "pip", "install", package,
+                            stdout=asyncio.subprocess.PIPE,
+                            stderr=asyncio.subprocess.PIPE
+                        )
+                        stdout, stderr = await proc.communicate()
+                        
+                        if proc.returncode == 0:
+                            installed.append(package)
+                            self.logger.info(f"Successfully installed: {package}")
+                        else:
+                            self.logger.error(f"Failed to install {package}: {stderr.decode()}")
+                    except Exception as e:
+                        self.logger.error(f"Error installing {package}: {e}")
+            else:
+                # Install packages one by one
+                for package in packages:
+                    try:
+                        self.logger.info(f"Installing package: {package}")
+                        proc = await asyncio.create_subprocess_exec(
+                            pip_path, "install", package,
+                            stdout=asyncio.subprocess.PIPE,
+                            stderr=asyncio.subprocess.PIPE
+                        )
+                        stdout, stderr = await proc.communicate()
+                        
+                        if proc.returncode == 0:
+                            installed.append(package)
+                            self.logger.info(f"Successfully installed: {package}")
+                        else:
+                            self.logger.error(f"Failed to install {package}: {stderr.decode()}")
+                    except Exception as e:
+                        self.logger.error(f"Error installing {package}: {e}")
+            
+            # Add venv site-packages to Python path
+            if installed:
+                site_packages = os.path.join(venv_path, "lib", f"python{sys.version_info.major}.{sys.version_info.minor}", "site-packages")
+                if os.path.exists(site_packages):
+                    sys.path.insert(0, site_packages)
+                    self.logger.info(f"Added {site_packages} to Python path")
+                else:
+                    # Try alternative site-packages location
+                    site_packages = os.path.join(venv_path, "Lib", "site-packages")
+                    if os.path.exists(site_packages):
+                        sys.path.insert(0, site_packages)
+                        self.logger.info(f"Added {site_packages} to Python path")
+                
+        except Exception as e:
+            self.logger.error(f"Error setting up virtual environment: {e}")
+        
+        return installed
     
     async def _periodic_cleanup(self) -> None:
         """Periodically clean up orphaned sessions and free resources."""
@@ -377,6 +477,11 @@ class RemoteExecutionServicer(execution_pb2_grpc.RemoteExecutionServiceServicer)
                 
                 sys.path.insert(0, os.path.join(sandbox_path, "code"))
                 
+                # Install dependencies if provided
+                if request.dependencies:
+                    self.logger.info(f"Installing dependencies: {request.dependencies}")
+                    await self._install_pip_packages(list(request.dependencies), sandbox_path)
+                
                 object_pkl_path = os.path.join(sandbox_path, "serialized_object.pkl")
                 with open(object_pkl_path, 'r') as f:
                     encoded_obj = f.read()
@@ -520,6 +625,11 @@ class RemoteExecutionServicer(execution_pb2_grpc.RemoteExecutionServiceServicer)
                     code_root = os.path.join(sandbox_path, "code")
                     sys.path.insert(0, code_root)
                     logger.debug(f"Added {code_root} to sys.path")
+                    
+                    # Install dependencies if provided
+                    if init_request_data.dependencies:
+                        logger.info(f"Installing dependencies: {init_request_data.dependencies}")
+                        await self._install_pip_packages(list(init_request_data.dependencies), sandbox_path)
                     
                     # Load the serialized object
                     object_pkl_path = os.path.join(sandbox_path, "serialized_object.pkl")

@@ -124,6 +124,14 @@ Key test files:
 - Process-level isolation with resource limits
 - Future plans for microVM isolation (Firecracker/gVisor)
 
+### Pip Package Installation
+- Virtual environments created per session for isolation
+- Packages installed via `pip install` in the venv
+- Support for packages with extras (e.g., `qrcode[pil]`)
+- Automatic dependency resolution
+- Site-packages added to Python path for imports
+- Clear error handling if installation fails
+
 ### Data Serialization
 - JSON for simple types
 - CloudPickle for complex Python objects
@@ -171,12 +179,25 @@ async with RemoteProxyClient(config) as client:
     result = await remote_obj.process_data(input_data)
 ```
 
+**With Pip Package Dependencies:**
+```python
+config = RemoteExecutorConfig(
+    host="localhost", 
+    port=50052,
+    pip_packages=["numpy", "pandas", "scipy"]  # Specify required packages
+)
+async with RemoteProxyClient(config) as client:
+    # Packages are automatically installed in a virtual environment
+    remote_obj = await client.create_proxy(obj)
+```
+
 Key points:
 - Works with ANY serializable Python object
 - No special base class or interface required
 - Maintains object state on remote server between calls
 - Session management is automatic
 - All method calls are transparently forwarded to remote execution
+- Pip packages are installed in isolated virtual environments per session
 
 **Enhanced Features (as of Phase 4):**
 - **True Generator Streaming**: Generators return proxy objects that stream data on-demand

@@ -116,6 +116,7 @@ message StreamObjectInit {
   }
   map<string, string> config = 3;     // The configuration for the node
   string serialization_format = 4;    // The serialization format for data payloads
+  repeated string dependencies = 5;   // Required Python packages
 }
 
 // Request to execute a method on a serialized object
@@ -129,6 +130,7 @@ message ExecuteObjectMethodRequest {
     string method_name = 5;
     bytes method_args_data = 6; // Serialized arguments
     bytes method_kwargs_data = 7; // Serialized keyword arguments
+    repeated string dependencies = 8; // Required Python packages
 }
 
 // Response from executing a method on a serialized object
