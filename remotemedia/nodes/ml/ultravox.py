@@ -131,7 +131,7 @@ class UltravoxNode(Node):
                             # Legacy message without timestamp - skip it
                             pass
                 
-                logger.log(f"UltravoxNode: Using {len(turns)} turns in conversation context for session {session_id} "
+                logger.info(f"UltravoxNode: Using {len(turns)} turns in conversation context for session {session_id} "
                             f"(from last {self.conversation_history_minutes} minutes)")
         
         try:

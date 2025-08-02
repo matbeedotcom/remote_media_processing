@@ -413,4 +413,83 @@ To use remote execution, you need the gRPC server running.
     PYTHONPATH=. python remote_service/src/server.py
     ```
 
-The server will then listen for incoming gRPC requests from clients running a `RemoteExecutionNode` or `RemoteObjectExecutionNode`. 
+The server will then listen for incoming gRPC requests from clients running a `RemoteExecutionNode` or `RemoteObjectExecutionNode`.
+
+## 7. Code Packaging System
+
+The RemoteMedia SDK includes an advanced code packaging system that automatically handles dependencies when sending objects for remote execution.
+
+### How It Works
+
+When you use `RemoteObjectExecutionNode` or `RemoteProxyClient`, the SDK automatically:
+
+1. **Analyzes Dependencies**: Uses AST (Abstract Syntax Tree) analysis to find all Python modules imported by your code
+2. **Packages Code**: Creates a zip archive containing:
+   - Your serialized object (using CloudPickle)
+   - All local Python dependencies
+   - A manifest describing the package structure
+3. **Handles External Modules**: Properly packages modules from anywhere in the filesystem, not just the project directory
+4. **Preserves Structure**: Maintains the correct module hierarchy for imports
+5. **Pre-loads Modules**: On the server side, modules are pre-loaded into `sys.modules` before unpickling
+
+### External Module Support
+
+The packaging system now seamlessly handles modules outside the project root:
+
+```python
+# Your code can be anywhere - e.g., /home/user/my_project/custom_node.py
+class CustomProcessor:
+    def process(self, data):
+        return data * 2
+
+# In your pipeline
+from my_project.custom_node import CustomProcessor
+
+processor = CustomProcessor()
+remote_node = RemoteObjectExecutionNode(
+    obj_to_execute=processor,
+    remote_config=config
+)
+```
+
+The `CustomProcessor` class and its module will be:
+- Automatically detected and packaged
+- Extracted on the server with proper structure
+- Made available for CloudPickle deserialization
+
+### Package Structure Example
+
+When a module outside the project root is packaged:
+```
+code_package.zip
+├── manifest.json          # Package metadata
+├── serialized_object.pkl  # CloudPickle serialized object
+└── code/
+    ├── my_module.py      # Standalone modules
+    └── my_package/       # Package directories preserved
+        ├── __init__.py
+        └── submodule.py
+```
+
+### Best Practices
+
+1. **Module Organization**: Keep related code in proper Python modules (not in `__main__`)
+2. **Import Statements**: Use standard Python imports - the packager will analyze them
+3. **Dependencies**: Ensure all dependencies are importable Python modules
+4. **Pip Packages**: Use `pip_packages` parameter for external dependencies:
+   ```python
+   config = RemoteExecutorConfig(
+       host="localhost",
+       port=50052,
+       pip_packages=["numpy", "pandas"]
+   )
+   ```
+
+### Troubleshooting
+
+If you encounter import errors during remote execution:
+
+1. **Check Module Structure**: Ensure your code is in a proper Python module
+2. **Verify Imports**: Make sure all imports work locally first
+3. **Enable Debug Logging**: The server logs which modules are packaged and loaded
+4. **Module Names**: CloudPickle preserves the exact import path - ensure consistency 

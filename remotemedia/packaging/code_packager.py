@@ -79,8 +79,21 @@ class CodePackager:
             import inspect
             source_file = inspect.getfile(obj.__class__)
             source_path = Path(source_file).resolve()
-            if self.analyzer._is_local_dependency(source_path):
-                dependencies.add(source_path)
+            
+            # Always include the source file, even if it's outside project root
+            dependencies.add(source_path)
+            
+            # If the source is outside project root, analyze it for dependencies
+            if not self.analyzer._is_local_dependency(source_path):
+                logger.info(f"Object source {source_path} is outside project root, analyzing its dependencies")
+                # Create a temporary analyzer with the source file's directory as root
+                source_dir = source_path.parent
+                temp_analyzer = DependencyAnalyzer(project_root=source_dir)
+                source_deps = temp_analyzer.analyze_file(source_path)
+                # Add dependencies that are in the same directory as the source
+                for dep in source_deps:
+                    if dep.parent == source_dir:
+                        dependencies.add(dep)
         except (TypeError, OSError):
             logger.debug(f"Could not get source for object {obj}, it may be dynamically defined.")
         
@@ -98,6 +111,8 @@ class CodePackager:
             dependencies = self._apply_exclusions(dependencies, exclude_patterns)
         
         logger.info(f"Found {len(dependencies)} local dependencies")
+        for dep in dependencies:
+            logger.info(f"  - {dep}")
         
         # Create the archive
         return self._create_archive(
@@ -173,13 +188,20 @@ class CodePackager:
         with zipfile.ZipFile(archive_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
             
             # Create manifest
+            def safe_relative_path(file_path: Path) -> str:
+                """Get relative path or just filename if outside project root."""
+                try:
+                    return str(file_path.relative_to(self.project_root))
+                except ValueError:
+                    return file_path.name
+            
             manifest = {
                 "version": "1.0",
                 "type": "code_package",
                 "has_serialized_object": serialized_obj is not None,
                 "pip_requirements": pip_requirements,
-                "entry_files": [str(f.relative_to(self.project_root)) for f in entry_files] if entry_files else [],
-                "dependencies": [str(f.relative_to(self.project_root)) for f in dependencies]
+                "entry_files": [safe_relative_path(f) for f in entry_files] if entry_files else [],
+                "dependencies": [safe_relative_path(f) for f in dependencies]
             }
             
             # Add manifest
@@ -196,12 +218,34 @@ class CodePackager:
             # Add dependency files
             for dep_file in dependencies:
                 try:
-                    # Calculate relative path from project root
-                    rel_path = dep_file.relative_to(self.project_root)
+                    # Try to calculate relative path from project root
+                    try:
+                        rel_path = dep_file.relative_to(self.project_root)
+                        archive_path = f"code/{rel_path}"
+                    except ValueError:
+                        # File is outside project root
+                        # We need to preserve the module structure for proper imports
+                        # Get the module name from the file
+                        if dep_file.suffix == '.py':
+                            # For Python files, the module name is the stem
+                            module_name = dep_file.stem
+                            # Check if this is part of a package by looking for __init__.py
+                            parent_init = dep_file.parent / '__init__.py'
+                            if parent_init.exists():
+                                # It's part of a package, preserve package structure
+                                package_name = dep_file.parent.name
+                                archive_path = f"code/{package_name}/{dep_file.name}"
+                            else:
+                                # It's a standalone module
+                                archive_path = f"code/{dep_file.name}"
+                        else:
+                            # Non-Python files, just use the filename
+                            archive_path = f"code/{dep_file.name}"
+                        logger.info(f"Dependency {dep_file} is outside project root, adding as {archive_path}")
                     
-                    # Add to archive with proper path structure
-                    zf.write(dep_file, f"code/{rel_path}")
-                    logger.debug(f"Added dependency: {rel_path}")
+                    # Add to archive
+                    zf.write(dep_file, archive_path)
+                    logger.debug(f"Added dependency: {archive_path}")
                     
                 except Exception as e:
                     logger.warning(f"Failed to add dependency {dep_file}: {e}")

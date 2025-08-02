@@ -475,7 +475,22 @@ class RemoteExecutionServicer(execution_pb2_grpc.RemoteExecutionServiceServicer)
                     with zipfile.ZipFile(bio, 'r') as zf:
                         zf.extractall(sandbox_path)
                 
-                sys.path.insert(0, os.path.join(sandbox_path, "code"))
+                code_path = os.path.join(sandbox_path, "code")
+                sys.path.insert(0, code_path)
+                
+                # Debug: List what was extracted
+                self.logger.info(f"Sandbox path: {sandbox_path}")
+                self.logger.info(f"Code path added to sys.path: {code_path}")
+                
+                # Recursively list all files in sandbox
+                self.logger.info("All files in sandbox:")
+                for root, dirs, files in os.walk(sandbox_path):
+                    level = root.replace(sandbox_path, '').count(os.sep)
+                    indent = ' ' * 2 * level
+                    self.logger.info(f"{indent}{os.path.basename(root)}/")
+                    subindent = ' ' * 2 * (level + 1)
+                    for file in files:
+                        self.logger.info(f"{subindent}{file}")
                 
                 # Install dependencies if provided
                 if request.dependencies:
@@ -485,6 +500,38 @@ class RemoteExecutionServicer(execution_pb2_grpc.RemoteExecutionServiceServicer)
                 object_pkl_path = os.path.join(sandbox_path, "serialized_object.pkl")
                 with open(object_pkl_path, 'r') as f:
                     encoded_obj = f.read()
+                
+                # Before unpickling, ensure all Python files in code directory are importable
+                # This handles cases where modules are imported directly
+                if os.path.exists(code_path):
+                    # Walk through all subdirectories to find Python files
+                    for root, dirs, files in os.walk(code_path):
+                        for file in files:
+                            if file.endswith('.py') and file != '__init__.py':
+                                module_name = file[:-3]  # Remove .py extension
+                                module_path = os.path.join(root, file)
+                                
+                                # Check if it's in a subdirectory and adjust module name
+                                rel_path = os.path.relpath(module_path, code_path)
+                                if os.path.dirname(rel_path):
+                                    # It's in a subdirectory, use the full path as module name
+                                    module_parts = rel_path.replace(os.sep, '.')[:-3]  # Remove .py
+                                    full_module_name = module_parts
+                                else:
+                                    full_module_name = module_name
+                                
+                                # Add the module to sys.modules if it's not already there
+                                if module_name not in sys.modules:
+                                    import importlib.util
+                                    spec = importlib.util.spec_from_file_location(module_name, module_path)
+                                    if spec and spec.loader:
+                                        module = importlib.util.module_from_spec(spec)
+                                        sys.modules[module_name] = module
+                                        try:
+                                            spec.loader.exec_module(module)
+                                            self.logger.info(f"Pre-loaded module '{module_name}' from {module_path}")
+                                        except Exception as e:
+                                            self.logger.warning(f"Failed to pre-load module '{module_name}': {e}")
                 
                 obj = cloudpickle.loads(base64.b64decode(encoded_obj))
                 

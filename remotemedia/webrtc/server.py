@@ -410,6 +410,19 @@ class WebRTCServer:
                         connection.pipeline_processor.remove_track(track)
                     )
         
+        @connection.pc.on("icecandidate")
+        async def on_icecandidate(candidate):
+            if candidate:
+                logger.debug(f"ICE candidate generated for {connection.connection_id}")
+                await self._send_signaling_message(connection.connection_id, {
+                    "type": "ice-candidate",
+                    "candidate": {
+                        "candidate": f"candidate:{candidate.foundation} {candidate.component} {candidate.protocol} {candidate.priority} {candidate.ip} {candidate.port} typ {candidate.type}",
+                        "sdpMid": candidate.sdpMid,
+                        "sdpMLineIndex": candidate.sdpMLineIndex
+                    }
+                })
+        
         @connection.pc.on("connectionstatechange")
         async def on_connectionstatechange():
             state = connection.pc.connectionState

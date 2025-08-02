@@ -16,6 +16,8 @@ The RemoteMedia Processing SDK enables developers to create complex, real-time p
 - **Secure Remote Execution**: Sandboxed execution environment for user-defined code
 - **CloudPickle Integration**: Serialize and execute user-defined Python classes remotely
 - **AST-Based Dependency Analysis**: Automatic detection and packaging of local Python dependencies
+- **Enhanced Code Packaging**: Handles modules from anywhere in the filesystem, not just project directory
+- **Automatic Module Loading**: Pre-loads Python modules on the server for proper deserialization
 - **Pip Package Dependencies**: Automatically install required packages on remote servers
 
 ## Development Status
