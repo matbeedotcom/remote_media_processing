@@ -3,6 +3,7 @@ Remote Execution Proxy Client that transparently captures and executes methods r
 """
 
 import asyncio
+import inspect
 import logging
 from typing import Any, Optional, Dict, List
 from functools import wraps
@@ -10,6 +11,7 @@ from functools import wraps
 from .client import RemoteExecutionClient
 from ..core.node import RemoteExecutorConfig
 from ..packaging.code_packager import CodePackager
+from .generator_proxy import RemoteGeneratorProxy, BatchedRemoteGeneratorProxy
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +38,10 @@ class RemoteProxy:
         
         # If it's a method, wrap it for remote execution
         if callable(attr):
+            # Check if it's a generator or async generator function
+            is_generator = inspect.isgeneratorfunction(attr)
+            is_async_generator = inspect.isasyncgenfunction(attr)
+            
             @wraps(attr)
             async def remote_method(*args, **kwargs):
                 """Execute the method remotely."""
@@ -49,14 +55,47 @@ class RemoteProxy:
                     method_name=name,
                     method_args=method_args
                 )
+                
+                # Check if the result is a generator marker
+                if isinstance(result, dict) and result.get("__generator__"):
+                    # Return a generator proxy instead of the marker
+                    generator_id = result["generator_id"]
+                    is_async = result.get("is_async", False)
+                    
+                    # Use batched proxy for better performance
+                    return BatchedRemoteGeneratorProxy(
+                        self._client.client,  # Access the underlying RemoteExecutionClient
+                        generator_id,
+                        batch_size=10,
+                        is_async=is_async
+                    )
+                
                 return result
+            
+            # Add metadata to help users understand what happened
+            if is_generator:
+                remote_method._is_generator_proxy = True
+                remote_method._original_is_generator = True
+            elif is_async_generator:
+                remote_method._is_async_generator_proxy = True
+                remote_method._original_is_async_generator = True
             
             # Always return async wrapper - caller should await
             return remote_method
         else:
-            # For non-callable attributes, we might want to fetch them remotely
-            # For now, just return the local attribute
-            return attr
+            # For non-callable attributes (properties), we need to fetch them remotely
+            # Return a coroutine that fetches the property value
+            async def get_property():
+                """Fetch property value remotely."""
+                result = await self._client._execute_remote_method(
+                    session_id=self._session_id,
+                    method_name=name,  # Server will detect this is a property
+                    method_args=[]
+                )
+                return result
+            
+            # Return the coroutine so it can be awaited
+            return get_property()
     
     def __repr__(self):
         return f"<RemoteProxy({type(self._obj).__name__}) at {self._session_id}>"
@@ -108,10 +147,12 @@ class RemoteProxyClient:
             A RemoteProxy that forwards all method calls to the remote service
         """
         # Execute initial object creation remotely and get session ID
-        # Use a dummy method to establish the session
+        # We need to send the object to the server and establish a session
+        # Using execute_object_method which handles the code packaging internally
+        # We'll use __init__ as a no-op since the object is already initialized
         result = await self.client.execute_object_method(
             obj=obj,
-            method_name="__class__",  # This is a safe attribute that always exists
+            method_name="__init__",  # Use __init__ as a safe method that exists
             method_args=[],
             serialization_format=serialization_format
         )

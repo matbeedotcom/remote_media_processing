@@ -71,6 +71,21 @@ class RemoteExecutionServiceStub(object):
                 request_serializer=execution__pb2.ListNodesRequest.SerializeToString,
                 response_deserializer=execution__pb2.ListNodesResponse.FromString,
                 _registered_method=True)
+        self.InitGenerator = channel.unary_unary(
+                '/remotemedia.execution.RemoteExecutionService/InitGenerator',
+                request_serializer=execution__pb2.InitGeneratorRequest.SerializeToString,
+                response_deserializer=execution__pb2.InitGeneratorResponse.FromString,
+                _registered_method=True)
+        self.GetNextBatch = channel.unary_unary(
+                '/remotemedia.execution.RemoteExecutionService/GetNextBatch',
+                request_serializer=execution__pb2.GetNextBatchRequest.SerializeToString,
+                response_deserializer=execution__pb2.GetNextBatchResponse.FromString,
+                _registered_method=True)
+        self.CloseGenerator = channel.unary_unary(
+                '/remotemedia.execution.RemoteExecutionService/CloseGenerator',
+                request_serializer=execution__pb2.CloseGeneratorRequest.SerializeToString,
+                response_deserializer=execution__pb2.CloseGeneratorResponse.FromString,
+                _registered_method=True)
 
 
 class RemoteExecutionServiceServicer(object):
@@ -127,6 +142,25 @@ class RemoteExecutionServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def InitGenerator(self, request, context):
+        """Generator streaming support
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetNextBatch(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def CloseGenerator(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_RemoteExecutionServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -164,6 +198,21 @@ def add_RemoteExecutionServiceServicer_to_server(servicer, server):
                     servicer.ListNodes,
                     request_deserializer=execution__pb2.ListNodesRequest.FromString,
                     response_serializer=execution__pb2.ListNodesResponse.SerializeToString,
+            ),
+            'InitGenerator': grpc.unary_unary_rpc_method_handler(
+                    servicer.InitGenerator,
+                    request_deserializer=execution__pb2.InitGeneratorRequest.FromString,
+                    response_serializer=execution__pb2.InitGeneratorResponse.SerializeToString,
+            ),
+            'GetNextBatch': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetNextBatch,
+                    request_deserializer=execution__pb2.GetNextBatchRequest.FromString,
+                    response_serializer=execution__pb2.GetNextBatchResponse.SerializeToString,
+            ),
+            'CloseGenerator': grpc.unary_unary_rpc_method_handler(
+                    servicer.CloseGenerator,
+                    request_deserializer=execution__pb2.CloseGeneratorRequest.FromString,
+                    response_serializer=execution__pb2.CloseGeneratorResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -357,6 +406,87 @@ class RemoteExecutionService(object):
             '/remotemedia.execution.RemoteExecutionService/ListNodes',
             execution__pb2.ListNodesRequest.SerializeToString,
             execution__pb2.ListNodesResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def InitGenerator(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/remotemedia.execution.RemoteExecutionService/InitGenerator',
+            execution__pb2.InitGeneratorRequest.SerializeToString,
+            execution__pb2.InitGeneratorResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetNextBatch(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/remotemedia.execution.RemoteExecutionService/GetNextBatch',
+            execution__pb2.GetNextBatchRequest.SerializeToString,
+            execution__pb2.GetNextBatchResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def CloseGenerator(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/remotemedia.execution.RemoteExecutionService/CloseGenerator',
+            execution__pb2.CloseGeneratorRequest.SerializeToString,
+            execution__pb2.CloseGeneratorResponse.FromString,
             options,
             channel_credentials,
             insecure,

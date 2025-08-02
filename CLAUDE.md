@@ -178,6 +178,31 @@ Key points:
 - Session management is automatic
 - All method calls are transparently forwarded to remote execution
 
+**Enhanced Features (as of Phase 4):**
+- **True Generator Streaming**: Generators return proxy objects that stream data on-demand
+- **Async Generator Support**: Both sync and async generators stream transparently
+- **Property Access**: Properties and attributes accessible with `await`
+- **Mixed Method Types**: Handles sync, async, generators, and properties seamlessly
+- **Batched Fetching**: Generator items fetched in configurable batches (default: 10)
+- **Early Termination**: Breaking from iteration properly closes server resources
+- **Automatic Cleanup**: Generator sessions cleaned up after 10 minutes of inactivity
+
+**Implementation Details:**
+- Client-side: `proxy_client.py` uses `__getattr__` to intercept method calls
+- Server-side: `server.py` creates `GeneratorSession` objects for generator tracking
+- Generator detection: When result is generator, returns `{"__generator__": True, "generator_id": "..."}`
+- Client creates `RemoteGeneratorProxy` or `BatchedRemoteGeneratorProxy` for streaming
+- New gRPC methods: `InitGenerator`, `GetNextBatch`, `CloseGenerator`
+- Properties detected using `callable()` check and returned as values
+
+**Generator Streaming Architecture:**
+1. Method returns generator → Server creates GeneratorSession
+2. Server returns marker with generator_id
+3. Client creates generator proxy
+4. `async for` triggers GetNextBatch RPC calls
+5. Items fetched in batches, deserialized, and yielded
+6. Generator closed on completion or break
+
 ### Adding a New Node Type
 1. Create new class inheriting from `Node` in `remotemedia/nodes/`
 2. Implement `process()` method (can be sync or async)

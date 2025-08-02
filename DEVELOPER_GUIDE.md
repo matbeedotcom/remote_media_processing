@@ -238,6 +238,60 @@ The `RemoteProxyClient` uses Python's `__getattr__` magic method to intercept al
 5. Returns the result back to the client
 6. The proxy deserializes and returns the result
 
+**Special Handling:**
+- **Generator Streaming (NEW!)**: Generators return proxy objects that stream data as needed
+- **Async Generators**: Both sync and async generators are transparently streamed
+- **Properties**: Non-callable attributes are fetched as values from the remote object
+- **Mixed Args**: Both positional and keyword arguments are properly serialized
+- **Batched Fetching**: Generator items are fetched in configurable batches (default: 10)
+- **Early Termination**: Breaking from iteration properly closes the generator on the server
+- **Error Propagation**: Exceptions in generators are propagated to the client
+
+**Implementation Details:**
+When a method returns a generator, the server:
+1. Creates a `GeneratorSession` to track the generator state
+2. Returns a special marker `{"__generator__": True, "generator_id": "...", "is_async": bool}`
+3. The client creates a `RemoteGeneratorProxy` that implements async iteration
+4. Items are fetched in batches using the `GetNextBatch` RPC method
+5. The generator is automatically closed on completion or error
+
+**Example - Streaming Large Files:**
+
+```python
+class DataProcessor:
+    def __init__(self):
+        self.data_path = "/large/dataset"
+    
+    def read_file_chunks(self, filename: str, chunk_size: int = 1024):
+        """Generator that yields file chunks."""
+        with open(f"{self.data_path}/{filename}", 'rb') as f:
+            while chunk := f.read(chunk_size):
+                yield chunk
+    
+    async def stream_sensor_data(self, sensor_id: str):
+        """Async generator for real-time data."""
+        while True:
+            data = await self.read_sensor(sensor_id)
+            if data is None:
+                break
+            yield data
+
+# Usage with RemoteProxyClient:
+async with RemoteProxyClient(config) as client:
+    processor = DataProcessor()
+    remote = await client.create_proxy(processor)
+    
+    # Streaming file chunks - only fetches as needed!
+    async for chunk in await remote.read_file_chunks("large_dataset.bin"):
+        process(chunk)
+        if processed_enough():
+            break  # Generator properly closed on server
+    
+    # Streaming sensor data
+    async for data in await remote.stream_sensor_data("sensor_001"):
+        handle_sensor_data(data)
+```
+
 ### Best Practices
 
 - **Serializable Objects**: Ensure your objects and their dependencies are serializable with CloudPickle
@@ -278,6 +332,59 @@ remote_obj = await client.create_proxy(obj)  # Works!
 - **Stateful Services**: Maintain complex state on powerful servers
 - **ML Model Inference**: Run models without local installation
 - **Data Processing**: Process large datasets remotely
+
+### Supported Python Features
+
+The RemoteProxyClient transparently handles various Python patterns:
+
+```python
+# Example class with different method types
+class DataProcessor:
+    def __init__(self):
+        self._count = 0
+    
+    # Regular methods - work perfectly
+    def process(self, data):
+        return data.upper()
+    
+    # Async methods - work perfectly
+    async def async_process(self, data):
+        await asyncio.sleep(0.1)
+        return data.lower()
+    
+    # Generators - automatically converted to lists
+    def generate_numbers(self, n):
+        for i in range(n):
+            yield i * 2
+    
+    # Async generators - automatically converted to lists
+    async def async_generate(self, n):
+        for i in range(n):
+            await asyncio.sleep(0.01)
+            yield i * 3
+    
+    # Properties - access with await
+    @property
+    def count(self):
+        return self._count
+    
+    # Special methods - most work correctly
+    def __call__(self, x):
+        return x * self._count
+
+# Usage
+async with RemoteProxyClient(config) as client:
+    processor = DataProcessor()
+    remote = await client.create_proxy(processor)
+    
+    # All these work transparently
+    result = await remote.process("hello")           # Regular method
+    async_result = await remote.async_process("WORLD")  # Async method
+    numbers = await remote.generate_numbers(5)      # Generator → list
+    async_nums = await remote.async_generate(3)     # Async gen → list
+    count = await remote.count                      # Property access
+    called = await remote.__call__(10)              # Special method
+```
 
 ## 6. Server Setup
 

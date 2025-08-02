@@ -90,7 +90,7 @@ pipeline = Pipeline(
 pipeline.run()
 ```
 
-### Remote Proxy Client
+### Remote Proxy Client (NEW!)
 The RemoteProxyClient provides the simplest way to execute ANY Python object remotely:
 
 ```python
@@ -120,8 +120,39 @@ async with RemoteProxyClient(config) as client:
 - **Transparent usage**: Call methods exactly as you would locally
 - **State persistence**: Objects maintain state on the remote server
 - **Session management**: Automatic session handling with unique IDs
+- **Generator support**: Generators automatically materialized to lists
+- **Property support**: Access properties with `await`
+- **Async method support**: Both sync and async methods work seamlessly
 
-See `examples/simplest_proxy.py` for more examples.
+**Supported Method Types:**
+- ✅ Synchronous methods (automatically wrapped in async)
+- ✅ Asynchronous methods
+- ✅ Generator functions (automatically converted to lists)
+- ✅ Async generator functions (automatically converted to lists)
+- ✅ Properties and attributes (accessed with `await`)
+- ✅ Static methods
+- ✅ Most special methods (`__call__`, `__getitem__`, etc.)
+
+**Generator Streaming Support (NEW!):** 
+- ✅ **True streaming**: Generators now return proxy objects that fetch items as needed
+- ✅ **Batched fetching**: Configurable batch size for optimal performance (default: 10 items)
+- ✅ **Early termination**: Stop iteration at any time, server resources are freed
+- ✅ **Memory efficient**: Only requested items are generated and transferred
+- ✅ **Automatic cleanup**: Generators are properly closed on completion or error
+- ✅ **Error propagation**: Server-side errors in generators are properly propagated to client
+
+Example:
+```python
+# Generators now stream data instead of materializing to lists!
+async for chunk in await remote_obj.read_large_file("data.bin"):
+    process(chunk)
+    if should_stop():
+        break  # Generator properly closed on server
+```
+
+See `examples/test_streaming_generators.py` for comprehensive examples.
+
+See `examples/simplest_proxy.py` and `examples/test_transparent_generators.py` for more examples.
 
 ## Installation
 

@@ -27,6 +27,11 @@ service RemoteExecutionService {
   
   // List available SDK nodes
   rpc ListNodes(ListNodesRequest) returns (ListNodesResponse);
+  
+  // Generator streaming support
+  rpc InitGenerator(InitGeneratorRequest) returns (InitGeneratorResponse);
+  rpc GetNextBatch(GetNextBatchRequest) returns (GetNextBatchResponse);
+  rpc CloseGenerator(CloseGeneratorRequest) returns (CloseGeneratorResponse);
 }
 
 // Execute SDK Node Request
@@ -189,4 +194,39 @@ message SessionInfo {
   int64 created_timestamp = 3;    // Session creation time
   int64 last_activity = 4;        // Last activity timestamp
   int32 processed_items = 5;      // Number of items processed
+}
+
+// Generator streaming messages
+message InitGeneratorRequest {
+  string session_id = 1;           // Object session ID
+  string method_name = 2;          // Generator method name
+  bytes method_args_data = 3;      // Serialized arguments
+  string serialization_format = 4;
+}
+
+message InitGeneratorResponse {
+  ExecutionStatus status = 1;
+  string generator_id = 2;         // Unique generator session ID
+  string error_message = 3;
+}
+
+message GetNextBatchRequest {
+  string generator_id = 1;         // Generator session ID
+  int32 batch_size = 2;           // Number of items to fetch
+  string serialization_format = 3;
+}
+
+message GetNextBatchResponse {
+  ExecutionStatus status = 1;
+  repeated bytes items = 2;        // Serialized items
+  bool has_more = 3;              // More items available
+  string error_message = 4;
+}
+
+message CloseGeneratorRequest {
+  string generator_id = 1;
+}
+
+message CloseGeneratorResponse {
+  ExecutionStatus status = 1;
 } 

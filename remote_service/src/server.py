@@ -43,6 +43,17 @@ import cloudpickle
 import numpy as np
 
 
+class GeneratorSession:
+    """Manages a generator's state for streaming."""
+    def __init__(self, generator, session_id: str):
+        self.generator = generator
+        self.session_id = session_id
+        self.created_at = time.time()
+        self.last_accessed = time.time()
+        self.is_exhausted = False
+        self.lock = asyncio.Lock()
+
+
 class RemoteExecutionServicer(execution_pb2_grpc.RemoteExecutionServiceServicer):
     """
     gRPC servicer implementation for remote execution.
@@ -64,6 +75,7 @@ class RemoteExecutionServicer(execution_pb2_grpc.RemoteExecutionServiceServicer)
         self.error_count = 0
         self.active_sessions: Dict[str, Any] = {}
         self.object_sessions: Dict[str, Any] = {}
+        self.generator_sessions: Dict[str, GeneratorSession] = {}  # Track generator sessions
         self.connection_objects: Dict[str, Dict[str, Any]] = {}  # Track objects per connection
         self._cleanup_lock = asyncio.Lock()
         
@@ -173,6 +185,30 @@ class RemoteExecutionServicer(execution_pb2_grpc.RemoteExecutionServiceServicer)
                         for session_id in orphaned_sessions:
                             session_data = self.object_sessions.get(session_id, {})
                             await self._cleanup_session(session_id, session_data)
+                    
+                    # Clean up old generator sessions (older than 10 minutes)
+                    old_generators = []
+                    current_time = time.time()
+                    for gen_id, gen_session in self.generator_sessions.items():
+                        if current_time - gen_session.last_accessed > 600:  # 10 minutes
+                            old_generators.append(gen_id)
+                    
+                    if old_generators:
+                        self.logger.info(f"Cleaning up {len(old_generators)} old generator sessions")
+                        for gen_id in old_generators:
+                            session = self.generator_sessions[gen_id]
+                            # Close generator if possible
+                            if hasattr(session.generator, 'aclose'):
+                                try:
+                                    await session.generator.aclose()
+                                except:
+                                    pass
+                            elif hasattr(session.generator, 'close'):
+                                try:
+                                    session.generator.close()
+                                except:
+                                    pass
+                            del self.generator_sessions[gen_id]
                     
                     # Force garbage collection and clear CUDA cache
                     import gc
@@ -366,16 +402,36 @@ class RemoteExecutionServicer(execution_pb2_grpc.RemoteExecutionServiceServicer)
             serializer = PickleSerializer() if request.serialization_format == 'pickle' else JSONSerializer()
             method_args = serializer.deserialize(request.method_args_data)
 
-            # Get and call method
-            method = getattr(obj, request.method_name)
-            
-            if asyncio.iscoroutinefunction(method):
-                result = await method(*method_args)
+            # Handle special proxy initialization
+            if request.method_name == "__init__":
+                # No-op for proxy initialization
+                result = None
             else:
-                result = method(*method_args)
-
-            if inspect.isasyncgen(result):
-                result = await result.__anext__()
+                # Get attribute/method
+                attr = getattr(obj, request.method_name)
+                
+                # Check if it's callable (method) or not (property/attribute)
+                if callable(attr):
+                    # It's a method - call it
+                    if asyncio.iscoroutinefunction(attr):
+                        result = await attr(*method_args)
+                    else:
+                        result = attr(*method_args)
+                    
+                    # Handle generators by creating a session instead of materializing
+                    if inspect.isgenerator(result) or inspect.isasyncgen(result):
+                        # Create generator session
+                        generator_id = str(uuid.uuid4())
+                        self.generator_sessions[generator_id] = GeneratorSession(
+                            generator=result,
+                            session_id=generator_id
+                        )
+                        # Return special marker
+                        result = {"__generator__": True, "generator_id": generator_id, 
+                                 "is_async": inspect.isasyncgen(result)}
+                else:
+                    # It's a property or attribute - just return its value
+                    result = attr
 
             result_data = serializer.serialize(result)
 
@@ -792,6 +848,127 @@ class RemoteExecutionServicer(execution_pb2_grpc.RemoteExecutionServiceServicer)
                 )
             )
         return execution_pb2.StreamCloseResponse(session_id=session_id)
+    
+    async def InitGenerator(
+        self,
+        request: execution_pb2.InitGeneratorRequest,
+        context: grpc.aio.ServicerContext
+    ) -> execution_pb2.InitGeneratorResponse:
+        """Initialize a new generator from an object method."""
+        try:
+            # Get object from session
+            if request.session_id not in self.object_sessions:
+                raise ValueError("Session not found")
+            
+            obj = self.object_sessions[request.session_id]['object']
+            
+            # Deserialize arguments
+            serializer = PickleSerializer() if request.serialization_format == 'pickle' else JSONSerializer()
+            method_args = serializer.deserialize(request.method_args_data)
+            
+            # Call method to get generator
+            attr = getattr(obj, request.method_name)
+            if asyncio.iscoroutinefunction(attr):
+                result = await attr(*method_args)
+            else:
+                result = attr(*method_args)
+            
+            # Verify it's a generator
+            if not (inspect.isgenerator(result) or inspect.isasyncgen(result)):
+                raise ValueError(f"Method {request.method_name} did not return a generator")
+            
+            # Create generator session
+            generator_id = str(uuid.uuid4())
+            self.generator_sessions[generator_id] = GeneratorSession(
+                generator=result,
+                session_id=generator_id
+            )
+            
+            return execution_pb2.InitGeneratorResponse(
+                status=types_pb2.EXECUTION_STATUS_SUCCESS,
+                generator_id=generator_id
+            )
+        except Exception as e:
+            self.logger.error(f"Error in InitGenerator: {e}", exc_info=True)
+            return execution_pb2.InitGeneratorResponse(
+                status=types_pb2.EXECUTION_STATUS_ERROR,
+                error_message=str(e)
+            )
+    
+    async def GetNextBatch(
+        self,
+        request: execution_pb2.GetNextBatchRequest,
+        context: grpc.aio.ServicerContext
+    ) -> execution_pb2.GetNextBatchResponse:
+        """Get next batch of items from a generator."""
+        try:
+            if request.generator_id not in self.generator_sessions:
+                raise ValueError("Generator session not found")
+            
+            session = self.generator_sessions[request.generator_id]
+            session.last_accessed = time.time()
+            
+            async with session.lock:
+                if session.is_exhausted:
+                    return execution_pb2.GetNextBatchResponse(
+                        status=types_pb2.EXECUTION_STATUS_SUCCESS,
+                        items=[],
+                        has_more=False
+                    )
+                
+                serializer = PickleSerializer() if request.serialization_format == 'pickle' else JSONSerializer()
+                items = []
+                
+                for _ in range(request.batch_size):
+                    try:
+                        if inspect.isasyncgen(session.generator):
+                            item = await session.generator.__anext__()
+                        else:
+                            item = next(session.generator)
+                        
+                        items.append(serializer.serialize(item))
+                    except (StopIteration, StopAsyncIteration):
+                        session.is_exhausted = True
+                        break
+                
+                return execution_pb2.GetNextBatchResponse(
+                    status=types_pb2.EXECUTION_STATUS_SUCCESS,
+                    items=items,
+                    has_more=not session.is_exhausted
+                )
+        except Exception as e:
+            self.logger.error(f"Error in GetNextBatch: {e}", exc_info=True)
+            return execution_pb2.GetNextBatchResponse(
+                status=types_pb2.EXECUTION_STATUS_ERROR,
+                error_message=str(e)
+            )
+    
+    async def CloseGenerator(
+        self,
+        request: execution_pb2.CloseGeneratorRequest,
+        context: grpc.aio.ServicerContext
+    ) -> execution_pb2.CloseGeneratorResponse:
+        """Close and cleanup a generator session."""
+        try:
+            if request.generator_id in self.generator_sessions:
+                session = self.generator_sessions[request.generator_id]
+                
+                # Close generator if it has close method
+                if hasattr(session.generator, 'aclose'):
+                    await session.generator.aclose()
+                elif hasattr(session.generator, 'close'):
+                    session.generator.close()
+                
+                del self.generator_sessions[request.generator_id]
+            
+            return execution_pb2.CloseGeneratorResponse(
+                status=types_pb2.EXECUTION_STATUS_SUCCESS
+            )
+        except Exception as e:
+            self.logger.error(f"Error in CloseGenerator: {e}", exc_info=True)
+            return execution_pb2.CloseGeneratorResponse(
+                status=types_pb2.EXECUTION_STATUS_ERROR
+            )
 
 
 class HealthServicer(health_pb2_grpc.HealthServicer):
